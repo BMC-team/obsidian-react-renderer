@@ -1,6 +1,7 @@
 import React from "react";
 import type { App } from "obsidian";
 import { ComponentRegistry } from "../registry/ComponentRegistry";
+import { processManager } from "./ProcessManager";
 
 // ============================================================
 // useSharedState — cross-component communication (in-memory)
@@ -1336,7 +1337,7 @@ function createUsePlugin(app: App) {
 // ============================================================
 
 function createUseProcess(getSettings: () => any) {
-	return function useProcess(): {
+	return function useProcess(processId?: string): {
 		run: (cmd: string, options?: { cwd?: string; shell?: string }) => boolean;
 		write: (input: string) => void;
 		kill: () => void;
@@ -1344,109 +1345,60 @@ function createUseProcess(getSettings: () => any) {
 		running: boolean;
 		exitCode: number | null;
 		clear: () => void;
+		id: string;
+		listAll: () => Array<{ id: string; cmd: string; running: boolean; exitCode: number | null }>;
 	} {
-		const [output, setOutput] = React.useState<string[]>([]);
-		const [running, setRunning] = React.useState(false);
-		const [exitCode, setExitCode] = React.useState<number | null>(null);
-		const procRef = React.useRef<any>(null);
+		const id = React.useRef(processId || `proc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`).current;
+		const [, forceUpdate] = React.useReducer((x: number) => x + 1, 0);
+
+		// Subscribe to process updates — triggers re-render when output changes
+		React.useEffect(() => {
+			return processManager.subscribe(id, forceUpdate);
+		}, [id]);
+
+		const entry = processManager.getProcess(id);
 
 		const run = React.useCallback((cmd: string, options?: { cwd?: string; shell?: string }) => {
 			const settings = getSettings();
 			if (!settings.enableScriptExecution) {
-				setOutput(["[ERROR] Script execution is disabled in settings."]);
+				processManager.run(id, "echo [ERROR] Script execution is disabled in settings.", {});
 				return false;
 			}
 			if (settings.scriptConfirmBeforeRun) {
 				if (!confirm(`Execute command?\n\n${cmd}\n\nCwd: ${options?.cwd || "(default)"}`)) {
-					setOutput(prev => [...prev, "[CANCELLED] User cancelled execution."]);
 					return false;
 				}
 			}
-
-			// Kill existing process
-			if (procRef.current) {
-				try { procRef.current.kill(); } catch {}
-			}
-
-			setOutput([`$ ${cmd}`, ""]);
-			setRunning(true);
-			setExitCode(null);
-
-			try {
-				const { spawn } = require("child_process");
-				const shell = options?.shell || (process.platform === "win32" ? "cmd.exe" : "/bin/bash");
-				const shellArgs = process.platform === "win32" ? ["/c", cmd] : ["-c", cmd];
-
-				const proc = spawn(shell, shellArgs, {
-					cwd: options?.cwd,
-					env: { ...process.env },
-					stdio: ["pipe", "pipe", "pipe"],
-				});
-
-				procRef.current = proc;
-
-				proc.stdout.on("data", (data: Buffer) => {
-					const lines = data.toString().split("\n");
-					setOutput(prev => [...prev, ...lines]);
-				});
-
-				proc.stderr.on("data", (data: Buffer) => {
-					const lines = data.toString().split("\n");
-					setOutput(prev => [...prev, ...lines.map((l: string) => `[stderr] ${l}`)]);
-				});
-
-				proc.on("close", (code: number) => {
-					setRunning(false);
-					setExitCode(code);
-					procRef.current = null;
-					setOutput(prev => [...prev, "", `[Process exited with code ${code}]`]);
-				});
-
-				proc.on("error", (err: Error) => {
-					setRunning(false);
-					procRef.current = null;
-					setOutput(prev => [...prev, `[ERROR] ${err.message}`]);
-				});
-
-				return true;
-			} catch (err: any) {
-				setRunning(false);
-				setOutput(prev => [...prev, `[ERROR] ${err.message}`]);
-				return false;
-			}
-		}, []);
+			processManager.run(id, cmd, options);
+			return true;
+		}, [id]);
 
 		const write = React.useCallback((input: string) => {
-			if (procRef.current && procRef.current.stdin) {
-				procRef.current.stdin.write(input + "\n");
-				setOutput(prev => [...prev, `> ${input}`]);
-			}
-		}, []);
+			processManager.write(id, input);
+		}, [id]);
 
 		const kill = React.useCallback(() => {
-			if (procRef.current) {
-				try {
-					procRef.current.kill("SIGTERM");
-					setOutput(prev => [...prev, "[SIGTERM sent]"]);
-				} catch {}
-			}
-		}, []);
+			processManager.kill(id);
+		}, [id]);
 
 		const clear = React.useCallback(() => {
-			setOutput([]);
-			setExitCode(null);
+			processManager.clearOutput(id);
+		}, [id]);
+
+		const listAll = React.useCallback(() => {
+			return processManager.listAll().map(p => ({
+				id: p.id, cmd: p.cmd, running: p.running, exitCode: p.exitCode,
+			}));
 		}, []);
 
-		// Cleanup on unmount
-		React.useEffect(() => {
-			return () => {
-				if (procRef.current) {
-					try { procRef.current.kill(); } catch {}
-				}
-			};
-		}, []);
+		// Do NOT kill on unmount — process persists across page navigations
 
-		return { run, write, kill, output, running, exitCode, clear };
+		return {
+			run, write, kill, clear, id, listAll,
+			output: entry?.output || [],
+			running: entry?.running || false,
+			exitCode: entry?.exitCode ?? null,
+		};
 	};
 }
 
@@ -1646,89 +1598,45 @@ function createUseClaudeTask(app: App, getSettings: () => any) {
 // ============================================================
 
 function createUseClaude(getSettings: () => any) {
-	return function useClaude(): {
+	return function useClaude(sessionId?: string): {
 		ask: (prompt: string, options?: { cwd?: string }) => boolean;
 		output: string[];
 		running: boolean;
 		kill: () => void;
 		clear: () => void;
 	} {
-		const [output, setOutput] = React.useState<string[]>([]);
-		const [running, setRunning] = React.useState(false);
-		const procRef = React.useRef<any>(null);
+		const id = React.useRef(sessionId || `claude-${Date.now()}`).current;
+		const [, forceUpdate] = React.useReducer((x: number) => x + 1, 0);
+
+		React.useEffect(() => {
+			return processManager.subscribe(id, forceUpdate);
+		}, [id]);
+
+		const entry = processManager.getProcess(id);
 
 		const ask = React.useCallback((prompt: string, options?: { cwd?: string }) => {
 			const settings = getSettings();
 			if (!settings.enableScriptExecution) {
-				setOutput(["[ERROR] Script execution is disabled in settings."]);
 				return false;
 			}
 			if (settings.scriptConfirmBeforeRun) {
 				if (!confirm(`Run Claude CLI?\n\nPrompt: ${prompt.slice(0, 200)}${prompt.length > 200 ? "..." : ""}`)) {
-					setOutput(prev => [...prev, "[CANCELLED] User cancelled."]);
 					return false;
 				}
 			}
 
-			if (procRef.current) {
-				try { procRef.current.kill(); } catch {}
-			}
+			const cliPath = settings.claudeCliPath || "claude";
+			processManager.run(id, `${cliPath} --print "${prompt.replace(/"/g, '\\"')}"`, options);
+			return true;
+		}, [id]);
 
-			setOutput([`[Claude] Sending prompt...`, `> ${prompt}`, ""]);
-			setRunning(true);
-
-			try {
-				const { spawn } = require("child_process");
-				const cliPath = settings.claudeCliPath || "claude";
-				const proc = spawn(cliPath, ["--print", prompt], {
-					cwd: options?.cwd,
-					stdio: ["pipe", "pipe", "pipe"],
-				});
-
-				procRef.current = proc;
-
-				proc.stdout.on("data", (data: Buffer) => {
-					setOutput(prev => [...prev, ...data.toString().split("\n")]);
-				});
-
-				proc.stderr.on("data", (data: Buffer) => {
-					setOutput(prev => [...prev, ...data.toString().split("\n").map((l: string) => `[stderr] ${l}`)]);
-				});
-
-				proc.on("close", (code: number) => {
-					setRunning(false);
-					procRef.current = null;
-					setOutput(prev => [...prev, "", `[Claude exited with code ${code}]`]);
-				});
-
-				proc.on("error", (err: Error) => {
-					setRunning(false);
-					procRef.current = null;
-					setOutput(prev => [...prev, `[ERROR] ${err.message}`]);
-				});
-
-				return true;
-			} catch (err: any) {
-				setRunning(false);
-				setOutput(prev => [...prev, `[ERROR] ${err.message}`]);
-				return false;
-			}
-		}, []);
-
-		const kill = React.useCallback(() => {
-			if (procRef.current) {
-				try { procRef.current.kill("SIGTERM"); } catch {}
-				setOutput(prev => [...prev, "[SIGTERM sent]"]);
-			}
-		}, []);
-
-		const clear = React.useCallback(() => { setOutput([]); }, []);
-
-		React.useEffect(() => {
-			return () => { if (procRef.current) try { procRef.current.kill(); } catch {} };
-		}, []);
-
-		return { ask, output, running, kill, clear };
+		return {
+			ask,
+			output: entry?.output || [],
+			running: entry?.running || false,
+			kill: () => processManager.kill(id),
+			clear: () => processManager.clearOutput(id),
+		};
 	};
 }
 

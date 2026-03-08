@@ -13,6 +13,7 @@ import { registerHeaderProcessor } from "./processors/HeaderProcessor";
 import { createLivePreviewExtension } from "./editor/LivePreviewPlugin";
 import { clearTranspileCache } from "./transpiler/transpile";
 import { clearSharedState, loadPersistent } from "./scope/ScopeBuilder";
+import { processManager } from "./scope/ProcessManager";
 
 export default class ReactRendererPlugin extends Plugin {
 	settings: ReactRendererSettings = DEFAULT_SETTINGS;
@@ -273,6 +274,9 @@ export default class ReactRendererPlugin extends Plugin {
 
 		// Clear shared state
 		clearSharedState();
+
+		// Kill all running processes
+		processManager.killAll();
 
 		// Clear registry
 		this.registry.clear();
