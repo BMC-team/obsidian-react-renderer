@@ -33,6 +33,11 @@ export default class ReactRendererPlugin extends Plugin {
 			() => this.settings.componentsFolder
 		);
 
+		// Load persistent state and file-based components BEFORE registering
+		// processors, so components are in scope when code blocks render.
+		await loadPersistent(this.app);
+		await this.loader.loadAll();
+
 		// Register code block processors (Reading Mode)
 		registerCodeBlockProcessor(this);
 
@@ -45,12 +50,6 @@ export default class ReactRendererPlugin extends Plugin {
 				createLivePreviewExtension(this),
 			]);
 		}
-
-		// Load persistent state and file-based components once layout is ready
-		this.app.workspace.onLayoutReady(async () => {
-			await loadPersistent(this.app);
-			await this.loader.loadAll();
-		});
 
 		// Watch for file changes
 		this.registerEvent(
