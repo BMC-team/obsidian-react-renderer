@@ -5,33 +5,37 @@ import React from "react";
  * Returns a React component function, or null on failure.
  *
  * The transpiled code is already unwrapped (just the function body).
- * We wrap it in `function UserComponent(props) { ...code }` and
- * inject scope variables via new Function() constructor arguments.
+ * We wrap it in `function UserComponent(props) { ... }` and inject
+ * scope variables by destructuring the scope object at render time.
+ * This ensures dynamic getters (registered components) resolve live.
  */
 export function evaluateComponent(
 	transpiledCode: string,
 	scope: Record<string, any>
 ): React.ComponentType<any> | null {
 	try {
-		const scopeKeys = Object.keys(scope);
-		const scopeValues = scopeKeys.map((k) => scope[k]);
-
 		const code = transpiledCode.trim();
 		if (!code) return null;
 
-		// The transpiled code is a function body (may have return statements).
-		// Wrap it in a component function.
-		// If code has no return statement, wrap the entire thing as a return expression.
 		const body = hasReturnStatement(code)
 			? code
 			: `return (${stripTrailingSemicolon(code)})`;
 
+		// Build destructuring statement for all scope keys
+		const scopeKeys = Object.keys(scope).filter(
+			(k) => /^[a-zA-Z_$][\w$]*$/.test(k)
+		);
+		const destructure = `const {${scopeKeys.join(",")}} = __scope__;`;
+
+		// The scope is passed as a single argument. Destructuring happens
+		// inside the component function body, so dynamic getters resolve
+		// at render time, not at definition time.
 		const factory = new Function(
-			...scopeKeys,
-			`return function UserComponent(props) {\n${body}\n}`
+			"__scope__",
+			`return function UserComponent(props) {\n${destructure}\n${body}\n}`
 		);
 
-		const component = factory(...scopeValues);
+		const component = factory(scope);
 		return component;
 	} catch (err) {
 		console.error("[ReactRenderer] Component evaluation error:", err);
@@ -48,9 +52,6 @@ export function evaluateInlineJSX(
 	scope: Record<string, any>
 ): React.ReactNode | null {
 	try {
-		const scopeKeys = Object.keys(scope);
-		const scopeValues = scopeKeys.map((k) => scope[k]);
-
 		const code = transpiledCode.trim();
 		if (!code) return null;
 
@@ -58,8 +59,13 @@ export function evaluateInlineJSX(
 			? code
 			: `return (${stripTrailingSemicolon(code)})`;
 
-		const fn = new Function(...scopeKeys, body);
-		return fn(...scopeValues);
+		const scopeKeys = Object.keys(scope).filter(
+			(k) => /^[a-zA-Z_$][\w$]*$/.test(k)
+		);
+		const destructure = `const {${scopeKeys.join(",")}} = __scope__;`;
+
+		const fn = new Function("__scope__", `${destructure}\n${body}`);
+		return fn(scope);
 	} catch (err) {
 		console.error("[ReactRenderer] Inline JSX evaluation error:", err);
 		return null;
