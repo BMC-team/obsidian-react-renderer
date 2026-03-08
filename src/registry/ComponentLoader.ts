@@ -115,25 +115,64 @@ export class ComponentLoader {
 		namespace: string;
 		isHeader: boolean;
 	} {
-		const frontmatter = cache?.frontmatter;
-		const namespace =
-			(frontmatter?.["react-components-namespace"] as string) || "global";
-		const isHeader = frontmatter?.["use-as-note-header"] === true;
-
-		// Component name from filename (strip extension)
-		const name = file.basename;
-
-		// Strip frontmatter from content
+		// Try metadata cache first, fall back to manual parsing
+		let frontmatter: Record<string, any> | null =
+			cache?.frontmatter ?? null;
 		let code = content;
+
 		if (cache?.frontmatterPosition) {
 			code = content
 				.slice(cache.frontmatterPosition.end.offset)
 				.trimStart();
+		} else {
+			// Manual frontmatter parsing (metadata cache not ready)
+			const parsed = this.parseFrontmatterManual(content);
+			frontmatter = parsed.frontmatter;
+			code = parsed.body;
 		}
+
+		const namespace =
+			(frontmatter?.["react-components-namespace"] as string) || "global";
+		const isHeader = frontmatter?.["use-as-note-header"] === true;
+		const name = file.basename;
 
 		if (!code.trim()) return { code: null, name: null, namespace, isHeader };
 
 		return { code, name, namespace, isHeader };
+	}
+
+	/** Parse YAML frontmatter without relying on metadata cache */
+	private parseFrontmatterManual(content: string): {
+		frontmatter: Record<string, any> | null;
+		body: string;
+	} {
+		const trimmed = content.trimStart();
+		if (!trimmed.startsWith("---")) {
+			return { frontmatter: null, body: content };
+		}
+
+		const endIdx = trimmed.indexOf("\n---", 3);
+		if (endIdx === -1) {
+			return { frontmatter: null, body: content };
+		}
+
+		const yamlBlock = trimmed.slice(4, endIdx);
+		const body = trimmed.slice(endIdx + 4).trimStart();
+
+		// Simple key: value parser (handles strings, booleans)
+		const fm: Record<string, any> = {};
+		for (const line of yamlBlock.split("\n")) {
+			const match = line.match(/^(\S+):\s*(.*)$/);
+			if (match) {
+				let val: any = match[2].trim();
+				if (val === "true") val = true;
+				else if (val === "false") val = false;
+				else if (/^\d+$/.test(val)) val = parseInt(val);
+				fm[match[1]] = val;
+			}
+		}
+
+		return { frontmatter: fm, body };
 	}
 
 	/** Recursively get component files from folder */
