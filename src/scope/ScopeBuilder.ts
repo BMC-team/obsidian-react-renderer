@@ -1396,7 +1396,7 @@ export function buildScope(registry: ComponentRegistry, app: App): Record<string
 		enumerable: true,
 	});
 
-	// Dynamic getters for all registered components
+	// Dynamic getters for all currently registered components
 	for (const name of registry.getNames()) {
 		Object.defineProperty(scope, name, {
 			get: () => {
@@ -1408,7 +1408,25 @@ export function buildScope(registry: ComponentRegistry, app: App): Record<string
 		});
 	}
 
-	return scope;
+	// Wrap in Proxy to catch access to components registered AFTER
+	// scope creation. with(__scope__) checks `has` trap first —
+	// if a property isn't on scope but IS in the registry, the proxy
+	// intercepts it. This permanently solves component timing issues.
+	return new Proxy(scope, {
+		has(target, prop) {
+			if (prop in target) return true;
+			if (typeof prop === "string" && registry.has(prop)) return true;
+			return false;
+		},
+		get(target, prop) {
+			if (prop in target) return target[prop as string];
+			if (typeof prop === "string" && registry.has(prop)) {
+				const entry = registry.get(prop);
+				return entry?.component ?? (() => null);
+			}
+			return undefined;
+		},
+	});
 }
 
 /**
