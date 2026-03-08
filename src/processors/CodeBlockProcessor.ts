@@ -78,7 +78,8 @@ async function renderJSXBlock(
 		const scope = buildScope(plugin.registry, plugin.app);
 		scope.Markdown = plugin.getMarkdownComponent();
 
-		const component = evaluateComponent(transpiled.code!, scope);
+		let evalError: string | null = null;
+		const component = evaluateComponent(transpiled.code!, scope, (err) => { evalError = err; });
 
 		if (component) {
 			plugin.renderer.mount(
@@ -93,7 +94,7 @@ async function renderJSXBlock(
 					React.createElement(ErrorBoundary, null, element)
 				);
 			} else {
-				renderError(container, "Component returned null");
+				renderError(container, evalError || "Component returned null");
 			}
 		}
 	} catch (err: any) {

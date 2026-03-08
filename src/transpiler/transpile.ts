@@ -72,17 +72,48 @@ export function transpileJSX(source: string): TranspileResult {
 
 /**
  * Strip the wrapper function from transpiled output.
- * Output looks like: `function __REACT_RENDERER_WRAPPER__() { ...code... }`
- * We extract just the body.
+ *
+ * Sucrase may prepend helper functions (e.g., _optionalChain for ?. syntax)
+ * before the wrapper. We find our specific wrapper function by name,
+ * then extract the body between its braces.
  */
 function unwrapTranspiledCode(code: string): string {
-	const openIdx = code.indexOf("{");
+	// Find our named wrapper function
+	const wrapperStart = code.indexOf("function __REACT_RENDERER_WRAPPER__()");
+	if (wrapperStart === -1) {
+		// Fallback: try first { / last }
+		const openIdx = code.indexOf("{");
+		if (openIdx === -1) return code;
+		const closeIdx = code.lastIndexOf("}");
+		if (closeIdx === -1 || closeIdx <= openIdx) return code;
+		return code.slice(openIdx + 1, closeIdx).trim();
+	}
+
+	// Find the opening brace of the wrapper function
+	const openIdx = code.indexOf("{", wrapperStart);
 	if (openIdx === -1) return code;
 
-	const closeIdx = code.lastIndexOf("}");
-	if (closeIdx === -1 || closeIdx <= openIdx) return code;
+	// Find the matching closing brace by counting braces
+	let depth = 1;
+	let i = openIdx + 1;
+	while (i < code.length && depth > 0) {
+		if (code[i] === "{") depth++;
+		else if (code[i] === "}") depth--;
+		i++;
+	}
 
-	return code.slice(openIdx + 1, closeIdx).trim();
+	if (depth !== 0) return code;
+
+	// Extract body (between opening { and matching })
+	let body = code.slice(openIdx + 1, i - 1).trim();
+
+	// Prepend any helper functions that Sucrase added before the wrapper
+	const helpers = code.slice(0, wrapperStart).trim();
+	if (helpers) {
+		body = helpers + "\n" + body;
+	}
+
+	return body;
 }
 
 /** Clear the transpilation cache */

@@ -11,7 +11,8 @@ import React from "react";
  */
 export function evaluateComponent(
 	transpiledCode: string,
-	scope: Record<string, any>
+	scope: Record<string, any>,
+	onError?: (message: string) => void
 ): React.ComponentType<any> | null {
 	try {
 		const code = transpiledCode.trim();
@@ -30,15 +31,16 @@ export function evaluateComponent(
 		// The scope is passed as a single argument. Destructuring happens
 		// inside the component function body, so dynamic getters resolve
 		// at render time, not at definition time.
-		const factory = new Function(
-			"__scope__",
-			`return function UserComponent(props) {\n${destructure}\n${body}\n}`
-		);
+		const fnBody = `return function UserComponent(props) {\n${destructure}\n${body}\n}`;
+		const factory = new Function("__scope__", fnBody);
 
 		const component = factory(scope);
 		return component;
-	} catch (err) {
-		console.error("[ReactRenderer] Component evaluation error:", err);
+	} catch (err: any) {
+		const msg = err.message || String(err);
+		console.error("[ReactRenderer] Component evaluation error:", msg);
+		console.error("[ReactRenderer] Scope keys:", Object.keys(scope));
+		if (onError) onError(msg);
 		return null;
 	}
 }
