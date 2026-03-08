@@ -12,7 +12,7 @@ import { registerCodeBlockProcessor } from "./processors/CodeBlockProcessor";
 import { registerHeaderProcessor } from "./processors/HeaderProcessor";
 import { createLivePreviewExtension } from "./editor/LivePreviewPlugin";
 import { clearTranspileCache } from "./transpiler/transpile";
-import { clearSharedState } from "./scope/ScopeBuilder";
+import { clearSharedState, loadPersistent } from "./scope/ScopeBuilder";
 
 export default class ReactRendererPlugin extends Plugin {
 	settings: ReactRendererSettings = DEFAULT_SETTINGS;
@@ -46,8 +46,9 @@ export default class ReactRendererPlugin extends Plugin {
 			]);
 		}
 
-		// Load file-based components once layout is ready
+		// Load persistent state and file-based components once layout is ready
 		this.app.workspace.onLayoutReady(async () => {
+			await loadPersistent(this.app);
 			await this.loader.loadAll();
 		});
 
