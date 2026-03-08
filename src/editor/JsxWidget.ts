@@ -46,7 +46,7 @@ export class JsxWidget extends WidgetType {
 
 	private async renderAsync(container: HTMLElement): Promise<void> {
 		try {
-			const transpiled = await transpileJSX(this.source);
+			const transpiled = transpileJSX(this.source);
 
 			if (transpiled.error) {
 				container.textContent = "";

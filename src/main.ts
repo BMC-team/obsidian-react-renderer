@@ -11,7 +11,6 @@ import { Markdown, unloadMarkdownComponent } from "./renderer/MarkdownComponent"
 import { registerCodeBlockProcessor } from "./processors/CodeBlockProcessor";
 import { registerHeaderProcessor } from "./processors/HeaderProcessor";
 import { createLivePreviewExtension } from "./editor/LivePreviewPlugin";
-import { preloadBabel } from "./transpiler/BabelManager";
 import { clearTranspileCache } from "./transpiler/transpile";
 import { clearSharedState } from "./scope/ScopeBuilder";
 
@@ -24,11 +23,6 @@ export default class ReactRendererPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
-
-		// Lazy or eager Babel loading
-		if (!this.settings.lazyLoadBabel) {
-			preloadBabel();
-		}
 
 		// Component loader
 		this.loader = new ComponentLoader(

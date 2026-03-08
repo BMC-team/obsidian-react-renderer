@@ -68,7 +68,7 @@ async function renderJSXBlock(
 	const container = el.createDiv({ cls: "react-renderer-container" });
 
 	try {
-		const transpiled = await transpileJSX(source);
+		const transpiled = transpileJSX(source);
 
 		if (transpiled.error) {
 			renderError(container, transpiled.error.message);
@@ -113,7 +113,7 @@ async function registerInlineComponent(
 	plugin: ReactRendererPlugin
 ): Promise<void> {
 	try {
-		const transpiled = await transpileJSX(source);
+		const transpiled = transpileJSX(source);
 
 		if (transpiled.error) {
 			el.replaceWith(

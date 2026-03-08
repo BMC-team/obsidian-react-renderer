@@ -19,7 +19,7 @@ describe("props support", () => {
 		const source = `
 			return <div>{props.name}</div>;
 		`;
-		const transpiled = await transpileJSX(source);
+		const transpiled = transpileJSX(source);
 		expect(transpiled.error).toBeNull();
 
 		const component = evaluateComponent(transpiled.code!, baseScope);
@@ -37,7 +37,7 @@ describe("props support", () => {
 			const { title, count } = props;
 			return <span>{title}: {count}</span>;
 		`;
-		const transpiled = await transpileJSX(source);
+		const transpiled = transpileJSX(source);
 		expect(transpiled.error).toBeNull();
 
 		const component = evaluateComponent(transpiled.code!, baseScope);
@@ -52,7 +52,7 @@ describe("props support", () => {
 			const { label = "Click me", variant = "primary" } = props;
 			return <button className={variant}>{label}</button>;
 		`;
-		const transpiled = await transpileJSX(source);
+		const transpiled = transpileJSX(source);
 		expect(transpiled.error).toBeNull();
 
 		const component = evaluateComponent(transpiled.code!, baseScope);
@@ -76,7 +76,7 @@ describe("props support", () => {
 			const { initial = 0, label = "Count" } = props;
 			return React.createElement("div", null, label + ": " + initial);
 		`;
-		const counterTranspiled = await transpileJSX(counterSource);
+		const counterTranspiled = transpileJSX(counterSource);
 		expect(counterTranspiled.error).toBeNull();
 
 		const counterComponent = evaluateComponent(counterTranspiled.code!, baseScope);
@@ -102,7 +102,7 @@ describe("props support", () => {
 		const usageSource = `
 			return <Counter initial={10} label="Score" />;
 		`;
-		const usageTranspiled = await transpileJSX(usageSource);
+		const usageTranspiled = transpileJSX(usageSource);
 		expect(usageTranspiled.error).toBeNull();
 
 		// Build a scope that includes Counter from registry
@@ -134,7 +134,7 @@ describe("props support", () => {
 		const source = `
 			return <div className="wrapper">{props.children}</div>;
 		`;
-		const transpiled = await transpileJSX(source);
+		const transpiled = transpileJSX(source);
 		const component = evaluateComponent(transpiled.code!, baseScope);
 
 		const child = React.createElement("span", null, "inner");

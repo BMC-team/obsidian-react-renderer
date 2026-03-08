@@ -80,18 +80,5 @@ export class ReactRendererSettingTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl)
-			.setName("Lazy load Babel")
-			.setDesc(
-				"Defer loading the JSX transpiler until the first code block is encountered. Reduces startup time."
-			)
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.lazyLoadBabel)
-					.onChange(async (value) => {
-						this.plugin.settings.lazyLoadBabel = value;
-						await this.plugin.saveSettings();
-					})
-			);
 	}
 }

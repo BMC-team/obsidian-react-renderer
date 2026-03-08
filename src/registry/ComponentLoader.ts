@@ -51,7 +51,7 @@ export class ComponentLoader {
 
 		if (!rawSource || !name) return;
 
-		const transpiled = await transpileJSX(rawSource);
+		const transpiled = transpileJSX(rawSource);
 		if (transpiled.error) {
 			console.warn(
 				`[ReactRenderer] Transpile error in ${file.path}:`,

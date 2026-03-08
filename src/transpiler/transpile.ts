@@ -1,4 +1,4 @@
-import { ensureBabel } from "./BabelManager";
+import { transform } from "sucrase";
 import type { TranspileResult } from "../types";
 
 const transpileCache = new Map<string, TranspileResult>();
@@ -19,42 +19,31 @@ const WRAPPER_PREFIX = "function __REACT_RENDERER_WRAPPER__() {\n";
 const WRAPPER_SUFFIX = "\n}";
 
 /**
- * Transpile JSX/TSX source code to plain JavaScript.
+ * Transpile JSX/TSX source code to plain JavaScript using Sucrase.
  * Results are cached by source hash.
  *
  * User code is wrapped in a function before transpilation so that
- * Babel accepts `return` statements (which are invalid at module top-level).
- * The wrapper is stripped from the output.
+ * `return` statements are valid. The wrapper is stripped from the output.
+ *
+ * Sucrase is synchronous — no lazy loading needed (215 KB vs Babel's 2.5 MB).
  */
-export async function transpileJSX(source: string): Promise<TranspileResult> {
+export function transpileJSX(source: string): TranspileResult {
 	const key = hashSource(source);
 	const cached = transpileCache.get(key);
 	if (cached) return cached;
 
 	try {
-		const Babel = await ensureBabel();
-
 		// Wrap in a function so `return` statements are valid
 		const wrapped = WRAPPER_PREFIX + source + WRAPPER_SUFFIX;
 
-		const output = Babel.transform(wrapped, {
-			presets: [
-				["react", { runtime: "classic" }],
-				[
-					"typescript",
-					{
-						isTSX: true,
-						allExtensions: true,
-						onlyRemoveTypeImports: true,
-					},
-				],
-			],
-			filename: "component.tsx",
+		const output = transform(wrapped, {
+			transforms: ["jsx", "typescript"],
+			jsxRuntime: "classic",
+			production: true,
 		});
 
 		// Strip the wrapper function from the output
-		let code = output.code as string;
-		code = unwrapTranspiledCode(code);
+		let code = unwrapTranspiledCode(output.code);
 
 		const result: TranspileResult = { code, error: null };
 
@@ -67,12 +56,14 @@ export async function transpileJSX(source: string): Promise<TranspileResult> {
 
 		return result;
 	} catch (err: any) {
+		// Sucrase errors include line info in the message
+		const lineMatch = err.message?.match(/\((\d+):(\d+)\)/);
 		const result: TranspileResult = {
 			code: null,
 			error: {
 				message: err.message || String(err),
-				line: err.loc?.line ? err.loc.line - 1 : null, // Adjust for wrapper line
-				column: err.loc?.column ?? null,
+				line: lineMatch ? parseInt(lineMatch[1]) - 1 : null, // Adjust for wrapper line
+				column: lineMatch ? parseInt(lineMatch[2]) : null,
 			},
 		};
 		return result;
@@ -80,20 +71,17 @@ export async function transpileJSX(source: string): Promise<TranspileResult> {
 }
 
 /**
- * Strip the wrapper function from Babel's transpiled output.
- * Babel outputs: `function __REACT_RENDERER_WRAPPER__() { ...code... }`
+ * Strip the wrapper function from transpiled output.
+ * Output looks like: `function __REACT_RENDERER_WRAPPER__() { ...code... }`
  * We extract just the body.
  */
 function unwrapTranspiledCode(code: string): string {
-	// Find the opening brace of the wrapper function
 	const openIdx = code.indexOf("{");
 	if (openIdx === -1) return code;
 
-	// Find the matching closing brace (last one in the string)
 	const closeIdx = code.lastIndexOf("}");
 	if (closeIdx === -1 || closeIdx <= openIdx) return code;
 
-	// Extract the body between the braces
 	return code.slice(openIdx + 1, closeIdx).trim();
 }
 

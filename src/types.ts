@@ -32,7 +32,6 @@ export interface ReactRendererSettings {
 	enableLivePreview: boolean;
 	enableHeaderComponent: boolean;
 	headerComponentName: string;
-	lazyLoadBabel: boolean;
 }
 
 export const DEFAULT_SETTINGS: ReactRendererSettings = {
@@ -41,7 +40,6 @@ export const DEFAULT_SETTINGS: ReactRendererSettings = {
 	enableLivePreview: true,
 	enableHeaderComponent: false,
 	headerComponentName: "",
-	lazyLoadBabel: true,
 };
 
 /** Context provided to wrapped user components */

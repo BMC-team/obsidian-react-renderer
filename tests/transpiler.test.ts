@@ -3,20 +3,20 @@ import { transpileJSX, clearTranspileCache } from "../src/transpiler/transpile";
 
 describe("transpileJSX", () => {
 	it("transpiles simple JSX to createElement calls", async () => {
-		const result = await transpileJSX("<div>Hello</div>");
+		const result = transpileJSX("<div>Hello</div>");
 		expect(result.error).toBeNull();
 		expect(result.code).toContain("React.createElement");
 		expect(result.code).toContain("Hello");
 	});
 
 	it("transpiles JSX with expressions", async () => {
-		const result = await transpileJSX('<div>{1 + 1}</div>');
+		const result = transpileJSX('<div>{1 + 1}</div>');
 		expect(result.error).toBeNull();
 		expect(result.code).toContain("1 + 1");
 	});
 
 	it("transpiles TSX with type annotations", async () => {
-		const result = await transpileJSX(
+		const result = transpileJSX(
 			'const x: number = 5; const el = <span>{x}</span>;'
 		);
 		expect(result.error).toBeNull();
@@ -25,7 +25,7 @@ describe("transpileJSX", () => {
 	});
 
 	it("transpiles component with hooks", async () => {
-		const result = await transpileJSX(`
+		const result = transpileJSX(`
 			const [count, setCount] = useState(0);
 			return <button onClick={() => setCount(c => c + 1)}>{count}</button>;
 		`);
@@ -35,14 +35,14 @@ describe("transpileJSX", () => {
 	});
 
 	it("returns error for invalid syntax", async () => {
-		const result = await transpileJSX("<div><span></div>");
+		const result = transpileJSX("<div><span></div>");
 		expect(result.error).not.toBeNull();
 		expect(result.error!.message).toBeTruthy();
 		expect(result.code).toBeNull();
 	});
 
 	it("returns error for completely broken code", async () => {
-		const result = await transpileJSX("{{{{");
+		const result = transpileJSX("{{{{");
 		expect(result.error).not.toBeNull();
 		expect(result.code).toBeNull();
 	});
@@ -50,19 +50,19 @@ describe("transpileJSX", () => {
 	it("caches results for identical source", async () => {
 		clearTranspileCache();
 		const source = "<div>cached</div>";
-		const result1 = await transpileJSX(source);
-		const result2 = await transpileJSX(source);
+		const result1 = transpileJSX(source);
+		const result2 = transpileJSX(source);
 		expect(result1.code).toBe(result2.code);
 	});
 
 	it("handles empty input", async () => {
-		const result = await transpileJSX("");
+		const result = transpileJSX("");
 		// Empty string is valid JS (no-op)
 		expect(result.error).toBeNull();
 	});
 
 	it("handles nested JSX", async () => {
-		const result = await transpileJSX(`
+		const result = transpileJSX(`
 			<div>
 				<h1>Title</h1>
 				<ul>
@@ -76,7 +76,7 @@ describe("transpileJSX", () => {
 	});
 
 	it("handles JSX with style objects", async () => {
-		const result = await transpileJSX(
+		const result = transpileJSX(
 			'<div style={{color: "red", fontSize: "16px"}}>Styled</div>'
 		);
 		expect(result.error).toBeNull();

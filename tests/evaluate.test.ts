@@ -16,7 +16,7 @@ const baseScope: Record<string, any> = {
 
 describe("evaluateComponent", () => {
 	it("evaluates code with explicit return as a component", async () => {
-		const transpiled = await transpileJSX(
+		const transpiled = transpileJSX(
 			'return React.createElement("div", null, "Hello");'
 		);
 		expect(transpiled.error).toBeNull();
@@ -25,7 +25,7 @@ describe("evaluateComponent", () => {
 	});
 
 	it("evaluates bare JSX expression (auto-wrapped with return)", async () => {
-		const transpiled = await transpileJSX("<div>Hello</div>");
+		const transpiled = transpileJSX("<div>Hello</div>");
 		expect(transpiled.error).toBeNull();
 		const component = evaluateComponent(transpiled.code!, baseScope);
 		expect(component).toBeTypeOf("function");
@@ -43,7 +43,7 @@ describe("evaluateComponent", () => {
 
 	it("can access scope variables", async () => {
 		const scope = { ...baseScope, myVar: "test-value" };
-		const transpiled = await transpileJSX(
+		const transpiled = transpileJSX(
 			'return React.createElement("span", null, myVar);'
 		);
 		expect(transpiled.error).toBeNull();
@@ -54,7 +54,7 @@ describe("evaluateComponent", () => {
 
 describe("evaluateInlineJSX", () => {
 	it("evaluates inline JSX and returns a ReactNode", async () => {
-		const transpiled = await transpileJSX("<div>Inline</div>");
+		const transpiled = transpileJSX("<div>Inline</div>");
 		expect(transpiled.error).toBeNull();
 		const result = evaluateInlineJSX(transpiled.code!, baseScope);
 		expect(result).not.toBeNull();
@@ -75,7 +75,7 @@ describe("end-to-end: transpile + evaluate", () => {
 				React.createElement("button", { onClick: () => setCount(c => c + 1) }, "+1")
 			);
 		`;
-		const transpiled = await transpileJSX(source);
+		const transpiled = transpileJSX(source);
 		expect(transpiled.error).toBeNull();
 		expect(transpiled.code).toContain("useState");
 
@@ -89,7 +89,7 @@ describe("end-to-end: transpile + evaluate", () => {
 			const name = "World";
 			return <h1>Hello, {name}!</h1>;
 		`;
-		const transpiled = await transpileJSX(source);
+		const transpiled = transpileJSX(source);
 		expect(transpiled.error).toBeNull();
 
 		const component = evaluateComponent(transpiled.code!, baseScope);
@@ -100,7 +100,7 @@ describe("end-to-end: transpile + evaluate", () => {
 		const source = `
 			return <div style={{color: "red", padding: "10px"}}>Styled</div>;
 		`;
-		const transpiled = await transpileJSX(source);
+		const transpiled = transpileJSX(source);
 		expect(transpiled.error).toBeNull();
 
 		const component = evaluateComponent(transpiled.code!, baseScope);
@@ -109,7 +109,7 @@ describe("end-to-end: transpile + evaluate", () => {
 
 	it("handles bare JSX without return", async () => {
 		const source = "<span>Just JSX</span>";
-		const transpiled = await transpileJSX(source);
+		const transpiled = transpileJSX(source);
 		expect(transpiled.error).toBeNull();
 
 		const component = evaluateComponent(transpiled.code!, baseScope);
@@ -127,7 +127,7 @@ describe("end-to-end: transpile + evaluate", () => {
 				</div>
 			);
 		`;
-		const transpiled = await transpileJSX(source);
+		const transpiled = transpileJSX(source);
 		expect(transpiled.error).toBeNull();
 
 		const component = evaluateComponent(transpiled.code!, baseScope);
