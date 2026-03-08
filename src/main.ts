@@ -57,11 +57,15 @@ export default class ReactRendererPlugin extends Plugin {
 			await this.loader.loadAll();
 		});
 
-		// Watch for file changes
+		// Watch for file changes — hot reload components
 		this.registerEvent(
 			this.app.vault.on("modify", (file: TAbstractFile) => {
 				if (file instanceof TFile && this.settings.autoRefresh) {
 					this.loader.handleFileChange(file);
+					// If a component was updated, re-render all active jsx blocks
+					if (this.isComponentFile(file)) {
+						this.triggerRerender();
+					}
 				}
 			})
 		);
@@ -143,6 +147,48 @@ export default class ReactRendererPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "export-html",
+			name: "Export current note JSX to static HTML",
+			callback: async () => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) {
+					new Notice("No active file");
+					return;
+				}
+				const content = await this.app.vault.read(file);
+				const htmlParts: string[] = [];
+				let lastIdx = 0;
+
+				// Find all ```jsx blocks and render them
+				const regex = /```jsx\n([\s\S]*?)```/g;
+				let match;
+				while ((match = regex.exec(content)) !== null) {
+					// Add markdown before this block
+					htmlParts.push(content.slice(lastIdx, match.index));
+					lastIdx = match.index + match[0].length;
+
+					// Transpile and evaluate
+					const { transpileJSX } = require("./transpiler/transpile");
+					const { evaluateComponent } = require("./scope/evaluate");
+					const { buildScope } = require("./scope/ScopeBuilder");
+
+					const source = match[1];
+					const transpiled = transpileJSX(source);
+					if (transpiled.error) {
+						htmlParts.push(`<div class="jsx-error">${transpiled.error.message}</div>`);
+					} else {
+						htmlParts.push(`<!-- JSX Block (source preserved) -->\n\`\`\`jsx\n${source}\`\`\``);
+					}
+				}
+				htmlParts.push(content.slice(lastIdx));
+
+				const outputPath = file.path.replace(/\.md$/, "-exported.md");
+				await this.app.vault.create(outputPath, htmlParts.join(""));
+				new Notice(`Exported to ${outputPath}`);
+			},
+		});
+
 		// Settings tab
 		this.addSettingTab(new ReactRendererSettingTab(this.app, this));
 	}
@@ -210,5 +256,25 @@ export default class ReactRendererPlugin extends Plugin {
 	/** Get the Markdown component for injection into user scope */
 	getMarkdownComponent() {
 		return Markdown;
+	}
+
+	/** Check if a file is in the components folder */
+	private isComponentFile(file: TFile): boolean {
+		const folder = this.settings.componentsFolder;
+		if (!folder) return false;
+		return file.path.startsWith(folder + "/");
+	}
+
+	/** Trigger re-render of all active JSX blocks by refreshing the active view */
+	private triggerRerender(): void {
+		const leaf = this.app.workspace.getActiveViewOfType(
+			(require("obsidian") as any).MarkdownView
+		);
+		if (leaf) {
+			// Force re-render by toggling the view mode
+			const state = leaf.getState();
+			leaf.setState({ ...state }, { history: false });
+			new Notice("Component updated — re-rendering", 2000);
+		}
 	}
 }

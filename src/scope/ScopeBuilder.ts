@@ -336,6 +336,182 @@ function createUseDataview(app: App) {
 }
 
 // ============================================================
+// useQuery — generic async data hook with caching
+// ============================================================
+
+const queryCache = new Map<string, { data: any; timestamp: number }>();
+
+function createUseQuery() {
+	return function useQuery<T>(
+		key: string,
+		fetchFn: () => Promise<T>,
+		options?: { cacheMs?: number }
+	): {
+		data: T | null;
+		loading: boolean;
+		error: string | null;
+		refetch: () => void;
+	} {
+		const cacheMs = options?.cacheMs ?? 0;
+
+		const [state, setState] = React.useState<{
+			data: T | null;
+			loading: boolean;
+			error: string | null;
+		}>(() => {
+			// Check cache
+			if (cacheMs > 0) {
+				const cached = queryCache.get(key);
+				if (cached && Date.now() - cached.timestamp < cacheMs) {
+					return { data: cached.data, loading: false, error: null };
+				}
+			}
+			return { data: null, loading: true, error: null };
+		});
+
+		const [fetchId, setFetchId] = React.useReducer((x: number) => x + 1, 0);
+
+		React.useEffect(() => {
+			let cancelled = false;
+
+			// Check cache before fetching
+			if (cacheMs > 0) {
+				const cached = queryCache.get(key);
+				if (cached && Date.now() - cached.timestamp < cacheMs) {
+					setState({ data: cached.data, loading: false, error: null });
+					return;
+				}
+			}
+
+			setState(prev => ({ ...prev, loading: true, error: null }));
+
+			fetchFn()
+				.then(data => {
+					if (!cancelled) {
+						if (cacheMs > 0) {
+							queryCache.set(key, { data, timestamp: Date.now() });
+						}
+						setState({ data, loading: false, error: null });
+					}
+				})
+				.catch(err => {
+					if (!cancelled) {
+						setState({ data: null, loading: false, error: err.message || String(err) });
+					}
+				});
+
+			return () => { cancelled = true; };
+		}, [key, fetchId]);
+
+		const refetch = React.useCallback(() => {
+			queryCache.delete(key);
+			setFetchId();
+		}, [key]);
+
+		return { ...state, refetch };
+	};
+}
+
+// ============================================================
+// Style — scoped CSS component
+// ============================================================
+
+let styleIdCounter = 0;
+
+function createStyleComponent() {
+	return function Style(props: { children: string }) {
+		const idRef = React.useRef(`rr-scope-${++styleIdCounter}`);
+		const containerRef = React.useRef<HTMLDivElement>(null);
+
+		React.useEffect(() => {
+			// Find the closest react-renderer-container and add our scope class
+			const el = containerRef.current;
+			if (!el) return;
+			const container = el.closest(".react-renderer-container");
+			if (container) {
+				container.classList.add(idRef.current);
+			}
+		}, []);
+
+		// Scope all CSS rules by prepending the scope class
+		const scopedCss = React.useMemo(() => {
+			const scopeClass = `.${idRef.current}`;
+			return props.children.replace(
+				/([^{}]+)\{/g,
+				(match, selectors: string) => {
+					const scoped = selectors
+						.split(",")
+						.map((s: string) => `${scopeClass} ${s.trim()}`)
+						.join(", ");
+					return `${scoped} {`;
+				}
+			);
+		}, [props.children]);
+
+		return React.createElement(
+			React.Fragment,
+			null,
+			React.createElement("div", { ref: containerRef, style: { display: "none" } }),
+			React.createElement("style", null, scopedCss)
+		);
+	};
+}
+
+// ============================================================
+// importFromUrl — load ES modules from CDN
+// ============================================================
+
+const urlImportCache = new Map<string, any>();
+
+function createUseImport() {
+	return function useImport(url: string): {
+		module: any;
+		loading: boolean;
+		error: string | null;
+	} {
+		const [state, setState] = React.useState<{
+			module: any;
+			loading: boolean;
+			error: string | null;
+		}>(() => {
+			const cached = urlImportCache.get(url);
+			if (cached) return { module: cached, loading: false, error: null };
+			return { module: null, loading: true, error: null };
+		});
+
+		React.useEffect(() => {
+			if (urlImportCache.has(url)) {
+				setState({ module: urlImportCache.get(url), loading: false, error: null });
+				return;
+			}
+
+			let cancelled = false;
+
+			// Dynamic import from URL
+			(async () => {
+				try {
+					// Use eval to bypass bundler interception of import()
+					const importFn = new Function("url", "return import(url)");
+					const mod = await importFn(url);
+					if (!cancelled) {
+						urlImportCache.set(url, mod);
+						setState({ module: mod, loading: false, error: null });
+					}
+				} catch (err: any) {
+					if (!cancelled) {
+						setState({ module: null, loading: false, error: err.message || String(err) });
+					}
+				}
+			})();
+
+			return () => { cancelled = true; };
+		}, [url]);
+
+		return state;
+	};
+}
+
+// ============================================================
 // buildScope — assemble the full scope object
 // ============================================================
 
@@ -371,6 +547,9 @@ export function buildScope(registry: ComponentRegistry, app: App): Record<string
 		useTheme: createUseTheme(),
 		useNote: createUseNote(app),
 		useDataview: createUseDataview(app),
+		useQuery: createUseQuery(),
+		useImport: createUseImport(),
+		Style: createStyleComponent(),
 	};
 
 	// Lazy-inject obsidian module (loaded on first access)
