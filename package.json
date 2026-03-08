@@ -1,0 +1,37 @@
+{
+	"name": "obsidian-react-renderer",
+	"version": "0.1.0",
+	"description": "Obsidian plugin for rendering JSX/React components inside notes",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "node esbuild.config.mjs production"
+	},
+	"keywords": [
+		"obsidian",
+		"react",
+		"jsx"
+	],
+	"author": "max-bmc",
+	"license": "MIT",
+	"dependencies": {
+		"@babel/standalone": "^7.26.0",
+		"react": "^18.3.1",
+		"react-dom": "^18.3.1"
+	},
+	"devDependencies": {
+		"@codemirror/language": "^6.0.0",
+		"@codemirror/state": "^6.0.0",
+		"@codemirror/view": "^6.0.0",
+		"@lezer/common": "^1.0.0",
+		"@types/babel__standalone": "^7.1.9",
+		"@types/node": "^25.3.5",
+		"@types/react": "^18.3.0",
+		"@types/react-dom": "^18.3.0",
+		"builtin-modules": "^4.0.0",
+		"esbuild": "^0.24.0",
+		"obsidian": "latest",
+		"tslib": "^2.8.0",
+		"typescript": "^5.6.0"
+	}
+}
