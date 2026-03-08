@@ -1,7 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
 import builtins from "builtin-modules";
-import { existsSync, readFileSync, copyFileSync } from "fs";
+import { existsSync, readFileSync, copyFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const isProduction = process.argv[2] === "production";
@@ -23,6 +23,12 @@ function deployToVault() {
 		} catch {
 			// Ignore copy errors (file locked, etc.)
 		}
+	}
+	// Write .hotreload marker so the plugin detects the rebuild
+	try {
+		writeFileSync(join(vaultPluginDir, ".hotreload"), String(Date.now()));
+	} catch {
+		// Ignore
 	}
 	console.log(`  → Deployed to ${vaultPluginDir}`);
 }

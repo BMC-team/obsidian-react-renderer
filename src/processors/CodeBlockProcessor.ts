@@ -71,7 +71,7 @@ async function renderJSXBlock(
 		const transpiled = transpileJSX(source);
 
 		if (transpiled.error) {
-			renderError(container, transpiled.error.message);
+			renderError(container, transpiled.error.message, source);
 			return;
 		}
 
@@ -94,11 +94,11 @@ async function renderJSXBlock(
 					React.createElement(ErrorBoundary, null, element)
 				);
 			} else {
-				renderError(container, evalError || "Component returned null");
+				renderError(container, evalError || "Component returned null", source);
 			}
 		}
 	} catch (err: any) {
-		renderError(container, err.message || String(err));
+		renderError(container, err.message || String(err), source);
 	}
 
 	plugin.register(() => {
@@ -151,16 +151,60 @@ async function registerInlineComponent(
 	}
 }
 
-function createErrorEl(message: string): HTMLElement {
+function createErrorEl(message: string, source?: string): HTMLElement {
 	const div = createEl("div", { cls: "react-renderer-error" });
 	div.createDiv({ cls: "react-renderer-error-title", text: "JSX Error" });
 	div.createEl("pre", { cls: "react-renderer-error-message", text: message });
+	if (source) {
+		renderSourceWithHighlight(div, source, message);
+	}
 	return div;
 }
 
-function renderError(container: HTMLElement, message: string): void {
+function renderError(container: HTMLElement, message: string, source?: string): void {
 	container.empty();
 	const errorEl = container.createDiv({ cls: "react-renderer-error" });
 	errorEl.createDiv({ cls: "react-renderer-error-title", text: "JSX Error" });
 	errorEl.createEl("pre", { cls: "react-renderer-error-message", text: message });
+	if (source) {
+		renderSourceWithHighlight(errorEl, source, message);
+	}
+}
+
+/**
+ * Render source code with the error line highlighted.
+ * Parses line number from error message (e.g., "(3:5)" or "line 3").
+ */
+function renderSourceWithHighlight(
+	container: HTMLElement,
+	source: string,
+	errorMessage: string
+): void {
+	// Extract line number from error message
+	const lineMatch = errorMessage.match(/\((\d+):(\d+)\)/) ||
+		errorMessage.match(/line\s+(\d+)/i);
+	const errorLine = lineMatch ? parseInt(lineMatch[1]) : null;
+
+	if (!errorLine) return;
+
+	const lines = source.split("\n");
+	const start = Math.max(0, errorLine - 3);
+	const end = Math.min(lines.length, errorLine + 2);
+
+	const codeEl = container.createDiv({ cls: "react-renderer-error-source" });
+
+	for (let i = start; i < end; i++) {
+		const lineNum = i + 1;
+		const lineEl = codeEl.createDiv({
+			cls: `react-renderer-error-line ${lineNum === errorLine ? "react-renderer-error-line-highlight" : ""}`,
+		});
+		lineEl.createSpan({
+			cls: "react-renderer-error-linenum",
+			text: String(lineNum).padStart(3, " "),
+		});
+		lineEl.createSpan({
+			cls: "react-renderer-error-code",
+			text: " " + lines[i],
+		});
+	}
 }

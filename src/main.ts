@@ -1,4 +1,4 @@
-import { Plugin, type TAbstractFile, TFile } from "obsidian";
+import { Plugin, type TAbstractFile, TFile, type Editor, Notice } from "obsidian";
 import { ReactRendererSettingTab } from "./settings";
 import {
 	DEFAULT_SETTINGS,
@@ -20,6 +20,8 @@ export default class ReactRendererPlugin extends Plugin {
 	renderer: ReactRenderer = new ReactRenderer();
 	private loader!: ComponentLoader;
 	private cleanupInterval: number | null = null;
+	private hotReloadInterval: number | null = null;
+	private lastHotReloadTs: string | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -85,6 +87,9 @@ export default class ReactRendererPlugin extends Plugin {
 			this.renderer.cleanupDetached();
 		}, 30000);
 
+		// Dev hot-reload: poll for .hotreload file changes in plugin dir
+		this.startHotReloadWatcher();
+
 		// Commands
 		this.addCommand({
 			id: "refresh-components",
@@ -101,6 +106,34 @@ export default class ReactRendererPlugin extends Plugin {
 			name: "Clear transpilation cache",
 			callback: () => {
 				clearTranspileCache();
+				new Notice("Transpilation cache cleared");
+			},
+		});
+
+		this.addCommand({
+			id: "insert-jsx-block",
+			name: "Insert JSX block",
+			editorCallback: (editor: Editor) => {
+				const template = '```jsx\nconst [value, setValue] = useState("");\nreturn (\n  <div>\n    \n  </div>\n);\n```\n';
+				editor.replaceSelection(template);
+			},
+		});
+
+		this.addCommand({
+			id: "insert-jsx-component",
+			name: "Insert JSX component definition",
+			editorCallback: (editor: Editor) => {
+				const template = '```jsx:component:MyComponent\nconst { label = "Default" } = props;\nreturn (\n  <div>\n    {label}\n  </div>\n);\n```\n';
+				editor.replaceSelection(template);
+			},
+		});
+
+		this.addCommand({
+			id: "insert-jsx-stateful",
+			name: "Insert JSX block with useState + useEffect",
+			editorCallback: (editor: Editor) => {
+				const template = '```jsx\nconst [data, setData] = useState([]);\nconst [loading, setLoading] = useState(true);\n\nuseEffect(() => {\n  // Load data\n  setLoading(false);\n}, []);\n\nif (loading) return <div>Loading...</div>;\n\nreturn (\n  <div>\n    {data.length} items\n  </div>\n);\n```\n';
+				editor.replaceSelection(template);
 			},
 		});
 
@@ -109,9 +142,12 @@ export default class ReactRendererPlugin extends Plugin {
 	}
 
 	onunload(): void {
-		// Clean up periodic interval
+		// Clean up intervals
 		if (this.cleanupInterval !== null) {
 			window.clearInterval(this.cleanupInterval);
+		}
+		if (this.hotReloadInterval !== null) {
+			window.clearInterval(this.hotReloadInterval);
 		}
 
 		// Unmount all React roots
@@ -125,6 +161,32 @@ export default class ReactRendererPlugin extends Plugin {
 
 		// Clear registry
 		this.registry.clear();
+	}
+
+	/** Poll for .hotreload file in plugin dir — shows notice when dev build is deployed */
+	private startHotReloadWatcher(): void {
+		const pluginDir = this.manifest.dir;
+		if (!pluginDir) return;
+
+		const hotReloadPath = `${pluginDir}/.hotreload`;
+
+		this.hotReloadInterval = window.setInterval(async () => {
+			try {
+				const adapter = this.app.vault.adapter;
+				if (await adapter.exists(hotReloadPath)) {
+					const content = await adapter.read(hotReloadPath);
+					if (this.lastHotReloadTs === null) {
+						// First read — just record the timestamp
+						this.lastHotReloadTs = content;
+					} else if (content !== this.lastHotReloadTs) {
+						this.lastHotReloadTs = content;
+						new Notice("React Renderer rebuilt — reload plugin or restart Obsidian to apply", 5000);
+					}
+				}
+			} catch {
+				// File doesn't exist or can't be read — ignore
+			}
+		}, 2000);
 	}
 
 	async loadSettings(): Promise<void> {

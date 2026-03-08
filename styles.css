@@ -51,6 +51,41 @@
 	cursor: pointer;
 }
 
+/* Error source code display */
+.react-renderer-error-source {
+	margin-top: 0.5em;
+	font-family: var(--font-monospace);
+	font-size: 0.75em;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 3px;
+	overflow-x: auto;
+}
+
+.react-renderer-error-line {
+	display: flex;
+	padding: 1px 8px;
+	line-height: 1.5;
+}
+
+.react-renderer-error-line-highlight {
+	background: rgba(255, 0, 0, 0.15);
+	border-left: 3px solid var(--text-error);
+	padding-left: 5px;
+}
+
+.react-renderer-error-linenum {
+	color: var(--text-muted);
+	user-select: none;
+	min-width: 2.5em;
+	text-align: right;
+	margin-right: 0.75em;
+	opacity: 0.6;
+}
+
+.react-renderer-error-code {
+	white-space: pre;
+}
+
 /* Registered component indicator */
 .react-renderer-registered {
 	color: var(--text-muted);
