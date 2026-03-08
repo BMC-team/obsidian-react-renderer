@@ -35,11 +35,15 @@ class LivePreviewPluginValue {
 	}
 
 	update(update: ViewUpdate): void {
-		if (
+		// Only rebuild decorations when content or viewport changes.
+		// Selection changes (cursor moves) only matter if the cursor
+		// enters/exits a JSX block — check that cheaply.
+		const needsRebuild =
 			update.docChanged ||
 			update.viewportChanged ||
-			update.selectionSet
-		) {
+			(update.selectionSet && this.cursorCrossedBlock(update));
+
+		if (needsRebuild) {
 			try {
 				this.decorations = this.buildDecorations(update.view);
 			} catch (err) {
@@ -47,6 +51,28 @@ class LivePreviewPluginValue {
 				this.decorations = EMPTY_DECORATIONS;
 			}
 		}
+	}
+
+	/** Check if cursor moved into or out of a JSX block */
+	private cursorCrossedBlock(update: ViewUpdate): boolean {
+		const oldPos = update.startState.selection.main.head;
+		const newPos = update.state.selection.main.head;
+
+		try {
+			const blocks = detectJSXCodeBlocks(
+				update.state,
+				update.view.viewport.from,
+				update.view.viewport.to
+			);
+			for (const block of blocks) {
+				const wasInside = oldPos >= block.from && oldPos <= block.to;
+				const isInside = newPos >= block.from && newPos <= block.to;
+				if (wasInside !== isInside) return true;
+			}
+		} catch {
+			return true; // Rebuild on error to be safe
+		}
+		return false;
 	}
 
 	destroy(): void {

@@ -512,6 +512,164 @@ function createUseImport() {
 }
 
 // ============================================================
+// useCanvas — draw on a canvas element
+// ============================================================
+
+function createUseCanvas() {
+	return function useCanvas(
+		drawFn: (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => void,
+		deps: any[] = []
+	): React.RefObject<HTMLCanvasElement | null> {
+		const canvasRef = React.useRef<HTMLCanvasElement>(null);
+
+		React.useEffect(() => {
+			const canvas = canvasRef.current;
+			if (!canvas) return;
+			const ctx = canvas.getContext("2d");
+			if (!ctx) return;
+
+			// Clear and redraw
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
+			drawFn(ctx, canvas);
+		}, deps);
+
+		return canvasRef;
+	};
+}
+
+// ============================================================
+// useSearch — full-text search across vault
+// ============================================================
+
+function createUseSearch(app: App) {
+	return function useSearch(query: string, maxResults = 20): {
+		results: Array<{ path: string; name: string; matches: string[] }>;
+		loading: boolean;
+	} {
+		const [state, setState] = React.useState<{
+			results: Array<{ path: string; name: string; matches: string[] }>;
+			loading: boolean;
+		}>({ results: [], loading: true });
+
+		React.useEffect(() => {
+			if (!query.trim()) {
+				setState({ results: [], loading: false });
+				return;
+			}
+
+			let cancelled = false;
+			const lowerQuery = query.toLowerCase();
+
+			(async () => {
+				const results: Array<{ path: string; name: string; matches: string[] }> = [];
+
+				for (const file of app.vault.getMarkdownFiles()) {
+					if (results.length >= maxResults) break;
+
+					try {
+						const content = await app.vault.cachedRead(file);
+						const lines = content.split("\n");
+						const matches: string[] = [];
+
+						for (const line of lines) {
+							if (line.toLowerCase().includes(lowerQuery)) {
+								matches.push(line.trim().slice(0, 120));
+								if (matches.length >= 3) break;
+							}
+						}
+
+						if (matches.length > 0) {
+							results.push({
+								path: file.path,
+								name: file.basename,
+								matches,
+							});
+						}
+					} catch {
+						// Skip unreadable files
+					}
+				}
+
+				if (!cancelled) setState({ results, loading: false });
+			})();
+
+			return () => { cancelled = true; };
+		}, [query]);
+
+		return state;
+	};
+}
+
+// ============================================================
+// useTags — get all tags or files with a specific tag
+// ============================================================
+
+function createUseTags(app: App) {
+	return function useTags(filterTag?: string): {
+		tags: Array<{ tag: string; count: number }>;
+		files: Array<{ path: string; name: string }>;
+	} {
+		const [state, setState] = React.useState<{
+			tags: Array<{ tag: string; count: number }>;
+			files: Array<{ path: string; name: string }>;
+		}>({ tags: [], files: [] });
+
+		React.useEffect(() => {
+			const tagMap = new Map<string, Set<string>>();
+
+			for (const file of app.vault.getMarkdownFiles()) {
+				const cache = app.metadataCache.getFileCache(file);
+				if (!cache) continue;
+
+				const fileTags = new Set<string>();
+
+				// From frontmatter tags
+				if (cache.frontmatter?.tags) {
+					const fmTags = Array.isArray(cache.frontmatter.tags)
+						? cache.frontmatter.tags
+						: [cache.frontmatter.tags];
+					for (const t of fmTags) {
+						fileTags.add(String(t).startsWith("#") ? String(t) : `#${t}`);
+					}
+				}
+
+				// From inline tags
+				if (cache.tags) {
+					for (const t of cache.tags) {
+						fileTags.add(t.tag);
+					}
+				}
+
+				for (const tag of fileTags) {
+					if (!tagMap.has(tag)) tagMap.set(tag, new Set());
+					tagMap.get(tag)!.add(file.path);
+				}
+			}
+
+			const tags = Array.from(tagMap.entries())
+				.map(([tag, paths]) => ({ tag, count: paths.size }))
+				.sort((a, b) => b.count - a.count);
+
+			let files: Array<{ path: string; name: string }> = [];
+			if (filterTag) {
+				const normalizedTag = filterTag.startsWith("#") ? filterTag : `#${filterTag}`;
+				const matchingPaths = tagMap.get(normalizedTag);
+				if (matchingPaths) {
+					files = Array.from(matchingPaths).map(p => {
+						const f = app.vault.getAbstractFileByPath(p);
+						return { path: p, name: (f as any)?.basename || p };
+					});
+				}
+			}
+
+			setState({ tags, files });
+		}, [filterTag]);
+
+		return state;
+	};
+}
+
+// ============================================================
 // buildScope — assemble the full scope object
 // ============================================================
 
@@ -549,6 +707,9 @@ export function buildScope(registry: ComponentRegistry, app: App): Record<string
 		useDataview: createUseDataview(app),
 		useQuery: createUseQuery(),
 		useImport: createUseImport(),
+		useCanvas: createUseCanvas(),
+		useSearch: createUseSearch(app),
+		useTags: createUseTags(app),
 		Style: createStyleComponent(),
 	};
 
