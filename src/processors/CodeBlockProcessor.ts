@@ -9,61 +9,53 @@ import { ErrorBoundary } from "../renderer/ErrorBoundary";
 import { isInsideCanvas } from "../utils/context";
 
 /**
- * Registers the `jsx` code block processor for Reading Mode.
+ * Registers processors for JSX code blocks in Reading Mode.
  *
- * Handles two variants within a single processor:
- * - ```jsx          — renders inline JSX
- * - ```jsx:component:Name  — registers a named component (no render)
- *
- * We use a single "jsx" registration and inspect the section info
- * to detect the :component:Name variant, avoiding issues with
- * colon-containing language names in Obsidian's processor registry.
+ * Two registration strategies:
+ * 1. registerMarkdownCodeBlockProcessor("jsx") — handles ```jsx blocks (render inline)
+ * 2. registerMarkdownPostProcessor — catches ```jsx:component:Name blocks that
+ *    Obsidian doesn't route to the "jsx" handler (Obsidian uses exact language matching,
+ *    so "jsx:component:Name" is a different language than "jsx")
  */
 export function registerCodeBlockProcessor(plugin: ReactRendererPlugin): void {
+	// Handle ```jsx blocks — render as live components
 	plugin.registerMarkdownCodeBlockProcessor(
 		"jsx",
 		async (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
-			// Skip Canvas contexts to prevent crashes
 			if (isInsideCanvas(el)) {
 				el.createEl("pre", { text: source, cls: "react-renderer-canvas-fallback" });
 				return;
 			}
-
-			// Check if this is a component definition block
-			// by inspecting the raw opening line for ```jsx:component:Name
-			const componentName = extractComponentName(el, ctx);
-			if (componentName) {
-				await registerInlineComponent(componentName, source, el, plugin);
-				return;
-			}
-
 			await renderJSXBlock(source, el, ctx, plugin);
 		}
 	);
-}
 
-/**
- * Extract component name from ```jsx:component:Name blocks.
- * Obsidian's code block processor receives "jsx" as the language,
- * so we need to check the raw markdown to detect the :component:Name suffix.
- */
-function extractComponentName(
-	el: HTMLElement,
-	ctx: MarkdownPostProcessorContext
-): string | null {
-	try {
-		const sectionInfo = ctx.getSectionInfo(el);
-		if (!sectionInfo) return null;
+	// Handle ```jsx:component:Name blocks — register components
+	// These are NOT matched by the "jsx" processor because Obsidian uses exact
+	// language matching. We catch them via a post-processor that scans for
+	// <code class="language-jsx:component:..."> elements.
+	plugin.registerMarkdownPostProcessor(
+		(el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
+			try {
+				const codeBlocks = el.querySelectorAll('code[class*="language-jsx:component:"]');
+				for (const codeEl of Array.from(codeBlocks)) {
+					const className = codeEl.className;
+					const match = className.match(/language-jsx:component:(\w+)/);
+					if (!match) continue;
 
-		const lines = sectionInfo.text.split("\n");
-		const openingLine = lines[sectionInfo.lineStart];
-		if (!openingLine) return null;
+					const componentName = match[1];
+					const source = codeEl.textContent || "";
+					const preEl = codeEl.parentElement; // <pre> wrapper
+					if (!preEl || preEl.tagName !== "PRE") continue;
 
-		const match = openingLine.match(/```jsx:component:(\w+)/);
-		return match ? match[1] : null;
-	} catch {
-		return null;
-	}
+					// Replace the <pre><code> with our registration indicator
+					registerInlineComponent(componentName, source, preEl, plugin);
+				}
+			} catch (err) {
+				console.error("[ReactRenderer] Component registration post-processor error:", err);
+			}
+		}
+	);
 }
 
 /** Render a JSX code block into a DOM element */
@@ -86,7 +78,6 @@ async function renderJSXBlock(
 		const scope = buildScope(plugin.registry, plugin.app);
 		scope.Markdown = plugin.getMarkdownComponent();
 
-		// Try evaluating as a component first (if it defines a function)
 		const component = evaluateComponent(transpiled.code!, scope);
 
 		if (component) {
@@ -95,7 +86,6 @@ async function renderJSXBlock(
 				React.createElement(ComponentWrapper, { component })
 			);
 		} else {
-			// Fall back to inline JSX evaluation
 			const element = evaluateInlineJSX(transpiled.code!, scope);
 			if (element) {
 				plugin.renderer.mount(
@@ -110,7 +100,6 @@ async function renderJSXBlock(
 		renderError(container, err.message || String(err));
 	}
 
-	// Register cleanup for when Obsidian removes this element
 	plugin.register(() => {
 		plugin.renderer.unmount(container);
 	});
@@ -127,10 +116,9 @@ async function registerInlineComponent(
 		const transpiled = await transpileJSX(source);
 
 		if (transpiled.error) {
-			el.createDiv({
-				cls: "react-renderer-error",
-				text: `Error in component ${name}: ${transpiled.error.message}`,
-			});
+			el.replaceWith(
+				createErrorEl(`Error in component ${name}: ${transpiled.error.message}`)
+			);
 			return;
 		}
 
@@ -149,28 +137,29 @@ async function registerInlineComponent(
 			lastUpdated: Date.now(),
 		});
 
-		// Show a subtle indicator that the component was registered
-		el.createDiv({
+		// Replace the raw code block with a registration indicator
+		const indicator = createEl("div", {
 			cls: "react-renderer-registered",
 			text: `Component "${name}" registered`,
 		});
+		el.replaceWith(indicator);
 	} catch (err: any) {
-		el.createDiv({
-			cls: "react-renderer-error",
-			text: `Error registering component ${name}: ${err.message || err}`,
-		});
+		el.replaceWith(
+			createErrorEl(`Error registering component ${name}: ${err.message || err}`)
+		);
 	}
+}
+
+function createErrorEl(message: string): HTMLElement {
+	const div = createEl("div", { cls: "react-renderer-error" });
+	div.createDiv({ cls: "react-renderer-error-title", text: "JSX Error" });
+	div.createEl("pre", { cls: "react-renderer-error-message", text: message });
+	return div;
 }
 
 function renderError(container: HTMLElement, message: string): void {
 	container.empty();
 	const errorEl = container.createDiv({ cls: "react-renderer-error" });
-	errorEl.createDiv({
-		cls: "react-renderer-error-title",
-		text: "JSX Error",
-	});
-	errorEl.createEl("pre", {
-		cls: "react-renderer-error-message",
-		text: message,
-	});
+	errorEl.createDiv({ cls: "react-renderer-error-title", text: "JSX Error" });
+	errorEl.createEl("pre", { cls: "react-renderer-error-message", text: message });
 }
