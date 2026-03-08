@@ -1333,6 +1333,46 @@ function createUsePlugin(app: App) {
 }
 
 // ============================================================
+// useLocalState — machine-local persistent state (localStorage, doesn't sync)
+// ============================================================
+
+function createUseLocalState() {
+	const PREFIX = "react-renderer-local:";
+
+	return function useLocalState<T>(
+		key: string,
+		initialValue: T
+	): [T, (val: T | ((prev: T) => T)) => void] {
+		const storageKey = PREFIX + key;
+
+		const [value, setValue] = React.useState<T>(() => {
+			try {
+				const stored = localStorage.getItem(storageKey);
+				if (stored !== null) return JSON.parse(stored);
+			} catch {}
+			return initialValue;
+		});
+
+		const setAndPersist = React.useCallback(
+			(val: T | ((prev: T) => T)) => {
+				setValue((prev) => {
+					const newVal = typeof val === "function"
+						? (val as (prev: T) => T)(prev)
+						: val;
+					try {
+						localStorage.setItem(storageKey, JSON.stringify(newVal));
+					} catch {}
+					return newVal;
+				});
+			},
+			[storageKey]
+		);
+
+		return [value, setAndPersist];
+	};
+}
+
+// ============================================================
 // useProcess — execute system commands with terminal output
 // ============================================================
 
@@ -1672,6 +1712,7 @@ export function buildScope(registry: ComponentRegistry, app: App, getSettings?: 
 		// Plugin helpers
 		useSharedState,
 		usePersistentState,
+		useLocalState: createUseLocalState(),
 		useFrontmatter: createUseFrontmatter(app),
 		useTheme: createUseTheme(),
 		useNote: createUseNote(app),

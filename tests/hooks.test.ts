@@ -19,6 +19,7 @@ const baseScope: Record<string, any> = {
 	},
 	useSharedState: (key: string, init: any) => [init, () => {}],
 	usePersistentState: (key: string, init: any) => [init, () => {}],
+	useLocalState: (key: string, init: any) => [init, () => {}],
 	useFrontmatter: () => ({}),
 	useTheme: () => "dark",
 	useNote: (path: string) => ({ content: "", frontmatter: {}, loading: false, error: null }),
@@ -87,6 +88,22 @@ describe("vault-aware hooks — transpile + evaluate", () => {
 				<div>
 					<div>Columns: {headers.join(", ")}</div>
 					<div>Rows: {values.length}</div>
+				</div>
+			);
+		`;
+		const transpiled = transpileJSX(source);
+		expect(transpiled.error).toBeNull();
+		const component = evaluateComponent(transpiled.code!, baseScope);
+		expect(component).toBeTypeOf("function");
+	});
+
+	it("useLocalState in component", () => {
+		const source = `
+			const [pref, setPref] = useLocalState("machine-pref", "default");
+			return (
+				<div>
+					<span>Preference: {pref}</span>
+					<button onClick={() => setPref("custom")}>Set Custom</button>
 				</div>
 			);
 		`;
