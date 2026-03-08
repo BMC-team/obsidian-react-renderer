@@ -538,6 +538,293 @@ function createUseCanvas() {
 }
 
 // ============================================================
+// Chart components — built on canvas
+// ============================================================
+
+function createChartComponents() {
+	function LineChart(props: {
+		data: number[];
+		width?: number;
+		height?: number;
+		color?: string;
+		fillColor?: string;
+		showDots?: boolean;
+		showGrid?: boolean;
+		label?: string;
+		min?: number;
+		max?: number;
+	}) {
+		const {
+			data, width = 400, height = 120, color = "#4a9eff",
+			fillColor, showDots = false, showGrid = true, label,
+			min: forceMin, max: forceMax,
+		} = props;
+
+		const canvasRef = React.useRef<HTMLCanvasElement>(null);
+
+		React.useEffect(() => {
+			const canvas = canvasRef.current;
+			if (!canvas || !data.length) return;
+			const ctx = canvas.getContext("2d");
+			if (!ctx) return;
+
+			const w = canvas.width;
+			const h = canvas.height;
+			const minVal = forceMin ?? Math.min(...data);
+			const maxVal = forceMax ?? Math.max(...data);
+			const range = maxVal - minVal || 1;
+			const step = w / (data.length - 1);
+
+			ctx.clearRect(0, 0, w, h);
+
+			if (showGrid) {
+				ctx.strokeStyle = "rgba(128,128,128,0.12)";
+				ctx.lineWidth = 1;
+				for (let i = 0; i <= 4; i++) {
+					const y = (i / 4) * h;
+					ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+				}
+			}
+
+			// Line
+			ctx.strokeStyle = color;
+			ctx.lineWidth = 2;
+			ctx.lineJoin = "round";
+			ctx.beginPath();
+			data.forEach((v, i) => {
+				const x = i * step;
+				const y = h - ((v - minVal) / range) * h;
+				if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+			});
+			ctx.stroke();
+
+			// Fill
+			if (fillColor) {
+				ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+				ctx.fillStyle = fillColor;
+				ctx.fill();
+			}
+
+			// Dots
+			if (showDots) {
+				ctx.fillStyle = color;
+				data.forEach((v, i) => {
+					const x = i * step;
+					const y = h - ((v - minVal) / range) * h;
+					ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+				});
+			}
+
+			// Label
+			if (label) {
+				ctx.fillStyle = "rgba(128,128,128,0.5)";
+				ctx.font = "11px var(--font-interface)";
+				ctx.fillText(label, 4, 14);
+			}
+		}, [data, color, fillColor, showDots, showGrid, label, forceMin, forceMax]);
+
+		return React.createElement("canvas", {
+			ref: canvasRef, width, height,
+			style: { width: "100%", height: height + "px", borderRadius: "4px" },
+		});
+	}
+
+	function BarChart(props: {
+		data: Array<{ label: string; value: number; color?: string }>;
+		width?: number;
+		height?: number;
+		color?: string;
+		showValues?: boolean;
+	}) {
+		const {
+			data, width = 400, height = 150, color = "#4a9eff", showValues = true,
+		} = props;
+
+		const canvasRef = React.useRef<HTMLCanvasElement>(null);
+
+		React.useEffect(() => {
+			const canvas = canvasRef.current;
+			if (!canvas || !data.length) return;
+			const ctx = canvas.getContext("2d");
+			if (!ctx) return;
+
+			const w = canvas.width;
+			const h = canvas.height;
+			const maxVal = Math.max(...data.map(d => d.value)) || 1;
+			const barWidth = (w / data.length) * 0.7;
+			const gap = (w / data.length) * 0.3;
+			const labelSpace = 20;
+
+			ctx.clearRect(0, 0, w, h);
+
+			data.forEach((d, i) => {
+				const x = i * (w / data.length) + gap / 2;
+				const barH = ((d.value / maxVal) * (h - labelSpace - 10));
+				const y = h - labelSpace - barH;
+
+				// Bar
+				ctx.fillStyle = d.color || color;
+				ctx.beginPath();
+				ctx.roundRect(x, y, barWidth, barH, 3);
+				ctx.fill();
+
+				// Value
+				if (showValues) {
+					ctx.fillStyle = "rgba(128,128,128,0.7)";
+					ctx.font = "10px var(--font-interface)";
+					ctx.textAlign = "center";
+					ctx.fillText(String(d.value), x + barWidth / 2, y - 4);
+				}
+
+				// Label
+				ctx.fillStyle = "rgba(128,128,128,0.5)";
+				ctx.font = "10px var(--font-interface)";
+				ctx.textAlign = "center";
+				ctx.fillText(d.label, x + barWidth / 2, h - 4);
+			});
+		}, [data, color, showValues]);
+
+		return React.createElement("canvas", {
+			ref: canvasRef, width, height,
+			style: { width: "100%", height: height + "px", borderRadius: "4px" },
+		});
+	}
+
+	function PieChart(props: {
+		data: Array<{ label: string; value: number; color: string }>;
+		width?: number;
+		height?: number;
+		showLabels?: boolean;
+		donut?: boolean;
+	}) {
+		const {
+			data, width = 200, height = 200, showLabels = true, donut = false,
+		} = props;
+
+		const canvasRef = React.useRef<HTMLCanvasElement>(null);
+
+		React.useEffect(() => {
+			const canvas = canvasRef.current;
+			if (!canvas || !data.length) return;
+			const ctx = canvas.getContext("2d");
+			if (!ctx) return;
+
+			const w = canvas.width;
+			const h = canvas.height;
+			const cx = w / 2;
+			const cy = h / 2;
+			const r = Math.min(cx, cy) - (showLabels ? 30 : 10);
+			const total = data.reduce((s, d) => s + d.value, 0) || 1;
+
+			ctx.clearRect(0, 0, w, h);
+
+			let startAngle = -Math.PI / 2;
+			data.forEach(d => {
+				const sliceAngle = (d.value / total) * Math.PI * 2;
+				const endAngle = startAngle + sliceAngle;
+
+				ctx.beginPath();
+				ctx.moveTo(cx, cy);
+				ctx.arc(cx, cy, r, startAngle, endAngle);
+				ctx.closePath();
+				ctx.fillStyle = d.color;
+				ctx.fill();
+
+				// Label
+				if (showLabels && sliceAngle > 0.3) {
+					const midAngle = startAngle + sliceAngle / 2;
+					const lx = cx + Math.cos(midAngle) * (r * 0.65);
+					const ly = cy + Math.sin(midAngle) * (r * 0.65);
+					ctx.fillStyle = "#fff";
+					ctx.font = "bold 10px var(--font-interface)";
+					ctx.textAlign = "center";
+					ctx.textBaseline = "middle";
+					ctx.fillText(d.label, lx, ly);
+				}
+
+				startAngle = endAngle;
+			});
+
+			// Donut hole
+			if (donut) {
+				ctx.beginPath();
+				ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2);
+				ctx.fillStyle = "var(--background-primary)";
+				ctx.fill();
+			}
+		}, [data, showLabels, donut]);
+
+		return React.createElement("canvas", {
+			ref: canvasRef, width, height,
+			style: { width: width + "px", height: height + "px" },
+		});
+	}
+
+	function GaugeChart(props: {
+		value: number;
+		max?: number;
+		width?: number;
+		height?: number;
+		label?: string;
+		color?: string;
+		thresholds?: { green: number; yellow: number };
+	}) {
+		const {
+			value, max = 100, width = 200, height = 120, label = "",
+			color, thresholds = { green: 80, yellow: 40 },
+		} = props;
+
+		const canvasRef = React.useRef<HTMLCanvasElement>(null);
+
+		React.useEffect(() => {
+			const canvas = canvasRef.current;
+			if (!canvas) return;
+			const ctx = canvas.getContext("2d");
+			if (!ctx) return;
+
+			const w = canvas.width;
+			const h = canvas.height;
+			const cx = w / 2;
+			const cy = h - 8;
+			const r = Math.min(cx, cy) - 8;
+			const pct = Math.min(100, Math.max(0, (value / max) * 100));
+			const angle = Math.PI + (pct / 100) * Math.PI;
+
+			ctx.clearRect(0, 0, w, h);
+
+			// Background arc
+			ctx.beginPath(); ctx.arc(cx, cy, r, Math.PI, 0);
+			ctx.lineWidth = 14; ctx.strokeStyle = "rgba(128,128,128,0.12)"; ctx.stroke();
+
+			// Value arc
+			const arcColor = color || (pct >= thresholds.green ? "#4caf50" : pct >= thresholds.yellow ? "#ff9800" : "#f44336");
+			ctx.beginPath(); ctx.arc(cx, cy, r, Math.PI, angle);
+			ctx.lineWidth = 14; ctx.lineCap = "round"; ctx.strokeStyle = arcColor; ctx.stroke();
+
+			// Value text
+			ctx.fillStyle = arcColor;
+			ctx.font = "bold 22px var(--font-interface)";
+			ctx.textAlign = "center";
+			ctx.fillText(Math.round(value) + (max === 100 ? "%" : ""), cx, cy - 12);
+
+			// Label
+			if (label) {
+				ctx.fillStyle = "rgba(128,128,128,0.5)";
+				ctx.font = "11px var(--font-interface)";
+				ctx.fillText(label, cx, cy + 6);
+			}
+		}, [value, max, color, label, thresholds]);
+
+		return React.createElement("canvas", {
+			ref: canvasRef, width, height,
+			style: { display: "block", margin: "0 auto" },
+		});
+	}
+
+	return { LineChart, BarChart, PieChart, GaugeChart };
+}
+
+// ============================================================
 // useSearch — full-text search across vault
 // ============================================================
 
@@ -711,6 +998,7 @@ export function buildScope(registry: ComponentRegistry, app: App): Record<string
 		useSearch: createUseSearch(app),
 		useTags: createUseTags(app),
 		Style: createStyleComponent(),
+		...createChartComponents(),
 	};
 
 	// Lazy-inject obsidian module (loaded on first access)
