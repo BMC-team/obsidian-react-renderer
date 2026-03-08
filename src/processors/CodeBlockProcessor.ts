@@ -12,10 +12,13 @@ import { waitForDomAttachment } from "../utils/dom";
 /**
  * Registers the `jsx` code block processor for Reading Mode.
  *
- * Handles three variants:
+ * Handles two variants within a single processor:
  * - ```jsx          — renders inline JSX
  * - ```jsx:component:Name  — registers a named component (no render)
- * - ```jsx:         — same as jsx (backwards compat)
+ *
+ * We use a single "jsx" registration and inspect the section info
+ * to detect the :component:Name variant, avoiding issues with
+ * colon-containing language names in Obsidian's processor registry.
  */
 export function registerCodeBlockProcessor(plugin: ReactRendererPlugin): void {
 	plugin.registerMarkdownCodeBlockProcessor(
@@ -27,40 +30,41 @@ export function registerCodeBlockProcessor(plugin: ReactRendererPlugin): void {
 				return;
 			}
 
+			// Check if this is a component definition block
+			// by inspecting the raw opening line for ```jsx:component:Name
+			const componentName = extractComponentName(el, ctx);
+			if (componentName) {
+				await registerInlineComponent(componentName, source, el, plugin);
+				return;
+			}
+
 			await renderJSXBlock(source, el, ctx, plugin);
 		}
 	);
+}
 
-	// Handle jsx:component:Name variant
-	plugin.registerMarkdownCodeBlockProcessor(
-		"jsx:component",
-		async (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
-			// This handles ```jsx:component:Name blocks
-			// The ":Name" part comes through in the section info
-			const sectionInfo = ctx.getSectionInfo(el);
-			let componentName: string | null = null;
+/**
+ * Extract component name from ```jsx:component:Name blocks.
+ * Obsidian's code block processor receives "jsx" as the language,
+ * so we need to check the raw markdown to detect the :component:Name suffix.
+ */
+function extractComponentName(
+	el: HTMLElement,
+	ctx: MarkdownPostProcessorContext
+): string | null {
+	try {
+		const sectionInfo = ctx.getSectionInfo(el);
+		if (!sectionInfo) return null;
 
-			if (sectionInfo) {
-				const lines = sectionInfo.text.split("\n");
-				const openingLine = lines[sectionInfo.lineStart];
-				const match = openingLine?.match(
-					/```jsx:component:(\w+)/
-				);
-				if (match) {
-					componentName = match[1];
-				}
-			}
+		const lines = sectionInfo.text.split("\n");
+		const openingLine = lines[sectionInfo.lineStart];
+		if (!openingLine) return null;
 
-			if (componentName) {
-				await registerInlineComponent(
-					componentName,
-					source,
-					el,
-					plugin
-				);
-			}
-		}
-	);
+		const match = openingLine.match(/```jsx:component:(\w+)/);
+		return match ? match[1] : null;
+	} catch {
+		return null;
+	}
 }
 
 /** Render a JSX code block into a DOM element */
@@ -131,36 +135,43 @@ async function registerInlineComponent(
 	el: HTMLElement,
 	plugin: ReactRendererPlugin
 ): Promise<void> {
-	const transpiled = await transpileJSX(source);
+	try {
+		const transpiled = await transpileJSX(source);
 
-	if (transpiled.error) {
+		if (transpiled.error) {
+			el.createDiv({
+				cls: "react-renderer-error",
+				text: `Error in component ${name}: ${transpiled.error.message}`,
+			});
+			return;
+		}
+
+		const scope = buildScope(plugin.registry, plugin.app);
+		scope.Markdown = plugin.getMarkdownComponent();
+		const component = evaluateComponent(transpiled.code!, scope);
+
+		plugin.registry.register({
+			name,
+			rawSource: source,
+			transpiledCode: transpiled.code!,
+			component,
+			sourceFilePath: null,
+			namespace: "global",
+			isHeader: false,
+			lastUpdated: Date.now(),
+		});
+
+		// Show a subtle indicator that the component was registered
+		el.createDiv({
+			cls: "react-renderer-registered",
+			text: `Component "${name}" registered`,
+		});
+	} catch (err: any) {
 		el.createDiv({
 			cls: "react-renderer-error",
-			text: `Error in component ${name}: ${transpiled.error.message}`,
+			text: `Error registering component ${name}: ${err.message || err}`,
 		});
-		return;
 	}
-
-	const scope = buildScope(plugin.registry, plugin.app);
-	scope.Markdown = plugin.getMarkdownComponent();
-	const component = evaluateComponent(transpiled.code!, scope);
-
-	plugin.registry.register({
-		name,
-		rawSource: source,
-		transpiledCode: transpiled.code!,
-		component,
-		sourceFilePath: null,
-		namespace: "global",
-		isHeader: false,
-		lastUpdated: Date.now(),
-	});
-
-	// Show a subtle indicator that the component was registered
-	el.createDiv({
-		cls: "react-renderer-registered",
-		text: `Component "${name}" registered`,
-	});
 }
 
 function renderError(container: HTMLElement, message: string): void {

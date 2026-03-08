@@ -4,31 +4,31 @@ import React from "react";
  * Evaluate transpiled component code within a scope.
  * Returns a React component function, or null on failure.
  *
- * The user code is expected to be a function body that returns JSX.
- * We wrap it in a function component that receives the scope.
+ * The transpiled code is already unwrapped (just the function body).
+ * We wrap it in `function UserComponent(props) { ...code }` and
+ * inject scope variables via new Function() constructor arguments.
  */
 export function evaluateComponent(
 	transpiledCode: string,
 	scope: Record<string, any>
 ): React.ComponentType<any> | null {
 	try {
-		// Build scope keys and values for Function constructor
 		const scopeKeys = Object.keys(scope);
 		const scopeValues = scopeKeys.map((k) => scope[k]);
 
-		// Wrap the user code as a component function body.
-		// User code should contain either:
-		//   - A return statement with JSX: `return <div>Hello</div>`
-		//   - A function/class definition that we'll detect and use
-		//   - Direct JSX expression (we wrap with return)
-		const wrappedCode = wrapUserCode(transpiledCode);
+		const code = transpiledCode.trim();
+		if (!code) return null;
 
-		// Create a factory function that takes scope values and returns a component
+		// The transpiled code is a function body (may have return statements).
+		// Wrap it in a component function.
+		// If code has no return statement, wrap the entire thing as a return expression.
+		const body = hasReturnStatement(code)
+			? code
+			: `return (${stripTrailingSemicolon(code)})`;
+
 		const factory = new Function(
 			...scopeKeys,
-			`return function UserComponent(props) {
-				${wrappedCode}
-			}`
+			`return function UserComponent(props) {\n${body}\n}`
 		);
 
 		const component = factory(...scopeValues);
@@ -51,9 +51,14 @@ export function evaluateInlineJSX(
 		const scopeKeys = Object.keys(scope);
 		const scopeValues = scopeKeys.map((k) => scope[k]);
 
-		const wrappedCode = wrapUserCode(transpiledCode);
+		const code = transpiledCode.trim();
+		if (!code) return null;
 
-		const fn = new Function(...scopeKeys, wrappedCode);
+		const body = hasReturnStatement(code)
+			? code
+			: `return (${stripTrailingSemicolon(code)})`;
+
+		const fn = new Function(...scopeKeys, body);
 		return fn(...scopeValues);
 	} catch (err) {
 		console.error("[ReactRenderer] Inline JSX evaluation error:", err);
@@ -62,26 +67,14 @@ export function evaluateInlineJSX(
 }
 
 /**
- * Wrap user code to ensure it returns a value.
- * If code doesn't have a return statement at the top level,
- * wrap the last expression with return.
+ * Check if code contains a top-level return statement.
+ * Simple heuristic: looks for `return` at the start of a line.
  */
-function wrapUserCode(code: string): string {
-	const trimmed = code.trim();
+function hasReturnStatement(code: string): boolean {
+	return /(?:^|\n)\s*return[\s(;]/.test(code);
+}
 
-	// If it already has a top-level return, use as-is
-	if (/^return\s/m.test(trimmed)) {
-		return trimmed;
-	}
-
-	// If it starts with a function/class declaration, return it
-	if (
-		/^(function|class)\s/.test(trimmed) ||
-		/^const\s+\w+\s*=/.test(trimmed)
-	) {
-		return trimmed;
-	}
-
-	// Otherwise wrap with return (handles bare JSX expressions)
-	return `return (${trimmed})`;
+/** Strip trailing semicolons so code can be wrapped in return(...) */
+function stripTrailingSemicolon(code: string): string {
+	return code.replace(/;\s*$/, "");
 }

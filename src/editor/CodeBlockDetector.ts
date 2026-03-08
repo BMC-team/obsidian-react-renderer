@@ -9,8 +9,10 @@ export interface DetectedCodeBlock {
 }
 
 /**
- * Find all fenced code blocks with a given info string prefix
+ * Find all fenced code blocks with a JSX info string
  * in the visible range of a CM6 editor state.
+ *
+ * Wrapped in try-catch to prevent ViewPlugin crashes.
  */
 export function detectJSXCodeBlocks(
 	state: EditorState,
@@ -19,46 +21,57 @@ export function detectJSXCodeBlocks(
 ): DetectedCodeBlock[] {
 	const blocks: DetectedCodeBlock[] = [];
 
-	syntaxTree(state).iterate({
-		from,
-		to,
-		enter(node) {
-			if (node.name !== "FencedCode") return;
+	try {
+		syntaxTree(state).iterate({
+			from,
+			to,
+			enter(node) {
+				if (node.name !== "FencedCode") return;
 
-			// Extract the info string (language tag)
-			let infoString = "";
-			let contentStart = node.from;
-			let contentEnd = node.to;
+				let infoString = "";
+				let contentStart = node.from;
+				let contentEnd = node.to;
 
-			// Walk children to find CodeInfo and CodeText
-			const cursor = node.node.cursor();
-			if (cursor.firstChild()) {
-				do {
-					if (cursor.name === "CodeInfo") {
-						infoString = state.sliceDoc(cursor.from, cursor.to);
-					} else if (cursor.name === "CodeText") {
-						contentStart = cursor.from;
-						contentEnd = cursor.to;
+				// Walk children to find CodeInfo and CodeText
+				try {
+					const cursor = node.node.cursor();
+					if (cursor.firstChild()) {
+						do {
+							if (cursor.name === "CodeInfo") {
+								infoString = state.sliceDoc(
+									cursor.from,
+									cursor.to
+								);
+							} else if (cursor.name === "CodeText") {
+								contentStart = cursor.from;
+								contentEnd = cursor.to;
+							}
+						} while (cursor.nextSibling());
 					}
-				} while (cursor.nextSibling());
-			}
+				} catch {
+					// Skip this block if cursor traversal fails
+					return;
+				}
 
-			// Check if this is a jsx block
-			const info = infoString.trim().toLowerCase();
-			if (
-				info === "jsx" ||
-				info === "jsx:" ||
-				info.startsWith("jsx:component:")
-			) {
-				blocks.push({
-					from: node.from,
-					to: node.to,
-					infoString: infoString.trim(),
-					content: state.sliceDoc(contentStart, contentEnd),
-				});
-			}
-		},
-	});
+				// Check if this is a jsx block
+				const info = infoString.trim().toLowerCase();
+				if (
+					info === "jsx" ||
+					info === "jsx:" ||
+					info.startsWith("jsx:component:")
+				) {
+					blocks.push({
+						from: node.from,
+						to: node.to,
+						infoString: infoString.trim(),
+						content: state.sliceDoc(contentStart, contentEnd),
+					});
+				}
+			},
+		});
+	} catch (err) {
+		console.error("[ReactRenderer] Code block detection error:", err);
+	}
 
 	return blocks;
 }

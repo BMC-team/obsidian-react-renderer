@@ -4,12 +4,13 @@ import {
 	Decoration,
 	type DecorationSet,
 	type EditorView,
-	WidgetType,
 } from "@codemirror/view";
 import { RangeSetBuilder } from "@codemirror/state";
 import type ReactRendererPlugin from "../main";
 import { detectJSXCodeBlocks } from "./CodeBlockDetector";
 import { JsxWidget } from "./JsxWidget";
+
+const EMPTY_DECORATIONS: DecorationSet = Decoration.none;
 
 /**
  * CM6 ViewPlugin that replaces JSX code blocks with rendered React components
@@ -20,13 +21,17 @@ import { JsxWidget } from "./JsxWidget";
  * - When cursor is INSIDE a JSX block: shows source code (hides component)
  */
 class LivePreviewPluginValue {
-	decorations: DecorationSet;
+	decorations: DecorationSet = EMPTY_DECORATIONS;
+	private plugin: ReactRendererPlugin;
 
-	constructor(
-		private view: EditorView,
-		private plugin: ReactRendererPlugin
-	) {
-		this.decorations = this.buildDecorations(view);
+	constructor(view: EditorView, plugin: ReactRendererPlugin) {
+		this.plugin = plugin;
+		try {
+			this.decorations = this.buildDecorations(view);
+		} catch (err) {
+			console.error("[ReactRenderer] LivePreview init error:", err);
+			this.decorations = EMPTY_DECORATIONS;
+		}
 	}
 
 	update(update: ViewUpdate): void {
@@ -35,7 +40,12 @@ class LivePreviewPluginValue {
 			update.viewportChanged ||
 			update.selectionSet
 		) {
-			this.decorations = this.buildDecorations(update.view);
+			try {
+				this.decorations = this.buildDecorations(update.view);
+			} catch (err) {
+				console.error("[ReactRenderer] LivePreview update error:", err);
+				this.decorations = EMPTY_DECORATIONS;
+			}
 		}
 	}
 
