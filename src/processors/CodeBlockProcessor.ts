@@ -7,7 +7,6 @@ import { buildScope } from "../scope/ScopeBuilder";
 import { ComponentWrapper } from "../renderer/ComponentWrapper";
 import { ErrorBoundary } from "../renderer/ErrorBoundary";
 import { isInsideCanvas } from "../utils/context";
-import { waitForDomAttachment } from "../utils/dom";
 
 /**
  * Registers the `jsx` code block processor for Reading Mode.
@@ -76,54 +75,43 @@ async function renderJSXBlock(
 ): Promise<void> {
 	const container = el.createDiv({ cls: "react-renderer-container" });
 
-	// Show loading indicator
-	container.createSpan({
-		text: "Loading...",
-		cls: "react-renderer-loading",
-	});
+	try {
+		const transpiled = await transpileJSX(source);
 
-	const cleanup = waitForDomAttachment(container, async () => {
-		try {
-			const transpiled = await transpileJSX(source);
+		if (transpiled.error) {
+			renderError(container, transpiled.error.message);
+			return;
+		}
 
-			if (transpiled.error) {
-				renderError(container, transpiled.error.message);
-				return;
-			}
+		const scope = buildScope(plugin.registry, plugin.app);
+		scope.Markdown = plugin.getMarkdownComponent();
 
-			const scope = buildScope(plugin.registry, plugin.app);
-			scope.Markdown = plugin.getMarkdownComponent();
+		// Try evaluating as a component first (if it defines a function)
+		const component = evaluateComponent(transpiled.code!, scope);
 
-			// Try evaluating as a component first (if it defines a function)
-			const component = evaluateComponent(transpiled.code!, scope);
-
-			if (component) {
-				container.empty();
+		if (component) {
+			plugin.renderer.mount(
+				container,
+				React.createElement(ComponentWrapper, { component })
+			);
+		} else {
+			// Fall back to inline JSX evaluation
+			const element = evaluateInlineJSX(transpiled.code!, scope);
+			if (element) {
 				plugin.renderer.mount(
 					container,
-					React.createElement(ComponentWrapper, { component })
+					React.createElement(ErrorBoundary, null, element)
 				);
 			} else {
-				// Fall back to inline JSX evaluation
-				const element = evaluateInlineJSX(transpiled.code!, scope);
-				if (element) {
-					container.empty();
-					plugin.renderer.mount(
-						container,
-						React.createElement(ErrorBoundary, null, element)
-					);
-				} else {
-					renderError(container, "Component returned null");
-				}
+				renderError(container, "Component returned null");
 			}
-		} catch (err: any) {
-			renderError(container, err.message || String(err));
 		}
-	});
+	} catch (err: any) {
+		renderError(container, err.message || String(err));
+	}
 
 	// Register cleanup for when Obsidian removes this element
 	plugin.register(() => {
-		cleanup();
 		plugin.renderer.unmount(container);
 	});
 }
