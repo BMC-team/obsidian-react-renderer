@@ -4,7 +4,7 @@
 	"version": "0.1.0",
 	"minAppVersion": "1.5.0",
 	"description": "Render JSX/React components inside your notes. Live Preview + Reading Mode, reusable component registry, cross-note state sharing.",
-	"author": "max-bmc",
-	"authorUrl": "https://github.com/max-bmc",
+	"author": "BMC-team",
+	"authorUrl": "https://github.com/BMC-team",
 	"isDesktopOnly": true
 }

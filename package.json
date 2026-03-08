@@ -14,7 +14,7 @@
 		"react",
 		"jsx"
 	],
-	"author": "max-bmc",
+	"author": "BMC-team",
 	"license": "MIT",
 	"dependencies": {
 		"@babel/standalone": "^7.26.0",
