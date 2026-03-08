@@ -1,7 +1,12 @@
 /**
  * Plugin-level process manager. Processes persist across note switches.
- * Components subscribe/unsubscribe to process output as they mount/unmount.
+ * Output is saved to localStorage for machine-local persistence across restarts.
+ * Live process handles (ChildProcess) are memory-only — can't survive restart.
  */
+
+const STORAGE_KEY = "react-renderer-processes";
+const MAX_STORED_PROCESSES = 20;
+const MAX_OUTPUT_LINES = 5000;
 
 export interface ManagedProcess {
 	id: string;
@@ -11,7 +16,16 @@ export interface ManagedProcess {
 	running: boolean;
 	exitCode: number | null;
 	startedAt: number;
-	proc: any; // ChildProcess
+	proc: any; // ChildProcess — memory only, not persisted
+}
+
+interface StoredProcess {
+	id: string;
+	cmd: string;
+	cwd: string;
+	output: string[];
+	exitCode: number | null;
+	startedAt: number;
 }
 
 type ProcessListener = () => void;
@@ -20,14 +34,58 @@ class ProcessManager {
 	private processes = new Map<string, ManagedProcess>();
 	private listeners = new Map<string, Set<ProcessListener>>();
 
-	/** Get or create a process entry */
+	constructor() {
+		this.loadFromStorage();
+	}
+
+	/** Load completed process history from localStorage */
+	private loadFromStorage(): void {
+		try {
+			const raw = localStorage.getItem(STORAGE_KEY);
+			if (!raw) return;
+			const stored: StoredProcess[] = JSON.parse(raw);
+			for (const s of stored) {
+				this.processes.set(s.id, {
+					...s,
+					running: false, // Can't be running after restart
+					proc: null,
+				});
+			}
+		} catch {
+			// Corrupted storage — ignore
+		}
+	}
+
+	/** Save process state to localStorage */
+	private saveToStorage(): void {
+		try {
+			const entries = Array.from(this.processes.values())
+				.map(p => ({
+					id: p.id,
+					cmd: p.cmd,
+					cwd: p.cwd,
+					output: p.output.slice(-MAX_OUTPUT_LINES), // Trim large outputs
+					exitCode: p.exitCode,
+					startedAt: p.startedAt,
+				}))
+				.sort((a, b) => b.startedAt - a.startedAt)
+				.slice(0, MAX_STORED_PROCESSES);
+
+			localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+		} catch {
+			// Storage full or unavailable — ignore
+		}
+	}
+
+	/** Get a process entry */
 	getProcess(id: string): ManagedProcess | undefined {
 		return this.processes.get(id);
 	}
 
 	/** List all processes */
 	listAll(): ManagedProcess[] {
-		return Array.from(this.processes.values());
+		return Array.from(this.processes.values())
+			.sort((a, b) => b.startedAt - a.startedAt);
 	}
 
 	/** Run a command, returns process ID */
@@ -51,6 +109,7 @@ class ProcessManager {
 		};
 
 		this.processes.set(id, entry);
+		this.saveToStorage();
 
 		try {
 			const { spawn } = require("child_process");
@@ -83,6 +142,7 @@ class ProcessManager {
 				entry.exitCode = code;
 				entry.proc = null;
 				entry.output.push("", `[Process exited with code ${code}]`);
+				this.saveToStorage();
 				this.notify(id);
 			});
 
@@ -90,11 +150,13 @@ class ProcessManager {
 				entry.running = false;
 				entry.proc = null;
 				entry.output.push(`[ERROR] ${err.message}`);
+				this.saveToStorage();
 				this.notify(id);
 			});
 		} catch (err: any) {
 			entry.running = false;
 			entry.output.push(`[ERROR] ${err.message}`);
+			this.saveToStorage();
 			this.notify(id);
 		}
 
@@ -119,6 +181,7 @@ class ProcessManager {
 			try {
 				entry.proc.kill("SIGTERM");
 				entry.output.push("[SIGTERM sent]");
+				this.saveToStorage();
 				this.notify(id);
 			} catch {}
 		}
@@ -130,15 +193,28 @@ class ProcessManager {
 		if (entry) {
 			entry.output = [];
 			entry.exitCode = null;
+			this.saveToStorage();
 			this.notify(id);
 		}
 	}
 
-	/** Remove a finished process entirely */
+	/** Remove a process entirely */
 	remove(id: string): void {
 		this.kill(id);
 		this.processes.delete(id);
 		this.listeners.delete(id);
+		this.saveToStorage();
+	}
+
+	/** Remove all completed (non-running) processes */
+	removeCompleted(): void {
+		for (const [id, entry] of this.processes) {
+			if (!entry.running) {
+				this.processes.delete(id);
+				this.listeners.delete(id);
+			}
+		}
+		this.saveToStorage();
 	}
 
 	/** Subscribe to changes for a process */
@@ -168,8 +244,8 @@ class ProcessManager {
 		for (const [id] of this.processes) {
 			this.kill(id);
 		}
-		this.processes.clear();
-		this.listeners.clear();
+		// Don't clear — keep history in localStorage for next restart
+		this.saveToStorage();
 	}
 }
 
