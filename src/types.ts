@@ -32,6 +32,10 @@ export interface ReactRendererSettings {
 	enableLivePreview: boolean;
 	enableHeaderComponent: boolean;
 	headerComponentName: string;
+	enableScriptExecution: boolean;
+	scriptConfirmBeforeRun: boolean;
+	claudeTasksFolder: string;
+	claudeCliPath: string;
 }
 
 export const DEFAULT_SETTINGS: ReactRendererSettings = {
@@ -40,6 +44,10 @@ export const DEFAULT_SETTINGS: ReactRendererSettings = {
 	enableLivePreview: true,
 	enableHeaderComponent: false,
 	headerComponentName: "",
+	enableScriptExecution: false,
+	scriptConfirmBeforeRun: true,
+	claudeTasksFolder: "",
+	claudeCliPath: "claude",
 };
 
 /** Context provided to wrapped user components */

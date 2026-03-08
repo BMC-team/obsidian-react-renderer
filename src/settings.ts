@@ -80,5 +80,65 @@ export class ReactRendererSettingTab extends PluginSettingTab {
 					})
 			);
 
+		// Script execution section
+		containerEl.createEl("h3", { text: "Script Execution" });
+
+		new Setting(containerEl)
+			.setName("Enable script execution")
+			.setDesc(
+				"Allow JSX blocks to execute system commands via useProcess, useClaudeTask, and useClaude hooks. SECURITY: enables arbitrary command execution."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.enableScriptExecution)
+					.onChange(async (value) => {
+						this.plugin.settings.enableScriptExecution = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Confirm before execution")
+			.setDesc(
+				"Show a confirmation dialog before running any script or command."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.scriptConfirmBeforeRun)
+					.onChange(async (value) => {
+						this.plugin.settings.scriptConfirmBeforeRun = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Claude tasks folder")
+			.setDesc(
+				"Vault-relative path for Claude task files (e.g. 'claude-tasks'). Claude threads can poll this folder for work."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("claude-tasks")
+					.setValue(this.plugin.settings.claudeTasksFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.claudeTasksFolder = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Claude CLI path")
+			.setDesc(
+				"Path to the Claude CLI executable (e.g. 'claude' or full path)."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("claude")
+					.setValue(this.plugin.settings.claudeCliPath)
+					.onChange(async (value) => {
+						this.plugin.settings.claudeCliPath = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
 	}
 }

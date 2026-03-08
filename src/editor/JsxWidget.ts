@@ -62,7 +62,7 @@ export class JsxWidget extends WidgetType {
 				return;
 			}
 
-			const scope = buildScope(this.plugin.registry, this.plugin.app);
+			const scope = buildScope(this.plugin.registry, this.plugin.app, () => this.plugin.settings);
 			scope.Markdown = this.plugin.getMarkdownComponent();
 
 			const component = evaluateComponent(transpiled.code!, scope);

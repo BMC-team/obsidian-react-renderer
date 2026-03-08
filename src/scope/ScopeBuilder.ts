@@ -1332,6 +1332,407 @@ function createUsePlugin(app: App) {
 }
 
 // ============================================================
+// useProcess — execute system commands with terminal output
+// ============================================================
+
+function createUseProcess(getSettings: () => any) {
+	return function useProcess(): {
+		run: (cmd: string, options?: { cwd?: string; shell?: string }) => boolean;
+		write: (input: string) => void;
+		kill: () => void;
+		output: string[];
+		running: boolean;
+		exitCode: number | null;
+		clear: () => void;
+	} {
+		const [output, setOutput] = React.useState<string[]>([]);
+		const [running, setRunning] = React.useState(false);
+		const [exitCode, setExitCode] = React.useState<number | null>(null);
+		const procRef = React.useRef<any>(null);
+
+		const run = React.useCallback((cmd: string, options?: { cwd?: string; shell?: string }) => {
+			const settings = getSettings();
+			if (!settings.enableScriptExecution) {
+				setOutput(["[ERROR] Script execution is disabled in settings."]);
+				return false;
+			}
+			if (settings.scriptConfirmBeforeRun) {
+				if (!confirm(`Execute command?\n\n${cmd}\n\nCwd: ${options?.cwd || "(default)"}`)) {
+					setOutput(prev => [...prev, "[CANCELLED] User cancelled execution."]);
+					return false;
+				}
+			}
+
+			// Kill existing process
+			if (procRef.current) {
+				try { procRef.current.kill(); } catch {}
+			}
+
+			setOutput([`$ ${cmd}`, ""]);
+			setRunning(true);
+			setExitCode(null);
+
+			try {
+				const { spawn } = require("child_process");
+				const shell = options?.shell || (process.platform === "win32" ? "cmd.exe" : "/bin/bash");
+				const shellArgs = process.platform === "win32" ? ["/c", cmd] : ["-c", cmd];
+
+				const proc = spawn(shell, shellArgs, {
+					cwd: options?.cwd,
+					env: { ...process.env },
+					stdio: ["pipe", "pipe", "pipe"],
+				});
+
+				procRef.current = proc;
+
+				proc.stdout.on("data", (data: Buffer) => {
+					const lines = data.toString().split("\n");
+					setOutput(prev => [...prev, ...lines]);
+				});
+
+				proc.stderr.on("data", (data: Buffer) => {
+					const lines = data.toString().split("\n");
+					setOutput(prev => [...prev, ...lines.map((l: string) => `[stderr] ${l}`)]);
+				});
+
+				proc.on("close", (code: number) => {
+					setRunning(false);
+					setExitCode(code);
+					procRef.current = null;
+					setOutput(prev => [...prev, "", `[Process exited with code ${code}]`]);
+				});
+
+				proc.on("error", (err: Error) => {
+					setRunning(false);
+					procRef.current = null;
+					setOutput(prev => [...prev, `[ERROR] ${err.message}`]);
+				});
+
+				return true;
+			} catch (err: any) {
+				setRunning(false);
+				setOutput(prev => [...prev, `[ERROR] ${err.message}`]);
+				return false;
+			}
+		}, []);
+
+		const write = React.useCallback((input: string) => {
+			if (procRef.current && procRef.current.stdin) {
+				procRef.current.stdin.write(input + "\n");
+				setOutput(prev => [...prev, `> ${input}`]);
+			}
+		}, []);
+
+		const kill = React.useCallback(() => {
+			if (procRef.current) {
+				try {
+					procRef.current.kill("SIGTERM");
+					setOutput(prev => [...prev, "[SIGTERM sent]"]);
+				} catch {}
+			}
+		}, []);
+
+		const clear = React.useCallback(() => {
+			setOutput([]);
+			setExitCode(null);
+		}, []);
+
+		// Cleanup on unmount
+		React.useEffect(() => {
+			return () => {
+				if (procRef.current) {
+					try { procRef.current.kill(); } catch {}
+				}
+			};
+		}, []);
+
+		return { run, write, kill, output, running, exitCode, clear };
+	};
+}
+
+// ============================================================
+// Terminal — built-in terminal display component
+// ============================================================
+
+function createTerminalComponent() {
+	return function Terminal(props: {
+		output: string[];
+		running?: boolean;
+		exitCode?: number | null;
+		onInput?: (input: string) => void;
+		onKill?: () => void;
+		onClear?: () => void;
+		height?: string;
+		title?: string;
+	}) {
+		const {
+			output, running = false, exitCode = null,
+			onInput, onKill, onClear, height = "300px", title = "Terminal",
+		} = props;
+		const [input, setInput] = React.useState("");
+		const bottomRef = React.useRef<HTMLDivElement>(null);
+
+		// Auto-scroll to bottom
+		React.useEffect(() => {
+			if (bottomRef.current) {
+				bottomRef.current.scrollIntoView({ behavior: "smooth" });
+			}
+		}, [output.length]);
+
+		const handleKeyDown = (e: any) => {
+			if (e.key === "Enter" && onInput && input.trim()) {
+				onInput(input);
+				setInput("");
+			}
+		};
+
+		const statusColor = running ? "#4caf50" : exitCode === 0 ? "#4caf50" : exitCode !== null ? "#f44336" : "var(--text-muted)";
+		const statusText = running ? "Running" : exitCode !== null ? `Exit: ${exitCode}` : "Idle";
+
+		return React.createElement("div", {
+			style: {
+				border: "1px solid var(--background-modifier-border)",
+				borderRadius: "6px", overflow: "hidden",
+				fontFamily: "var(--font-monospace)", fontSize: "12px",
+			},
+		},
+			// Header
+			React.createElement("div", {
+				style: {
+					display: "flex", alignItems: "center", gap: "8px",
+					padding: "6px 10px", backgroundColor: "#1e1e1e", color: "#ccc",
+				},
+			},
+				React.createElement("span", {
+					style: { width: "8px", height: "8px", borderRadius: "50%", backgroundColor: statusColor },
+				}),
+				React.createElement("span", { style: { flex: 1, fontSize: "11px" } }, title),
+				React.createElement("span", { style: { fontSize: "10px", color: "#888" } }, statusText),
+				running && onKill && React.createElement("button", {
+					onClick: onKill,
+					style: {
+						padding: "1px 8px", fontSize: "10px", borderRadius: "3px",
+						border: "1px solid #f44336", background: "transparent",
+						color: "#f44336", cursor: "pointer",
+					},
+				}, "Kill"),
+				onClear && React.createElement("button", {
+					onClick: onClear,
+					style: {
+						padding: "1px 8px", fontSize: "10px", borderRadius: "3px",
+						border: "1px solid #666", background: "transparent",
+						color: "#888", cursor: "pointer",
+					},
+				}, "Clear"),
+			),
+			// Output
+			React.createElement("div", {
+				style: {
+					backgroundColor: "#1a1a1a", color: "#d4d4d4",
+					padding: "8px 10px", height, overflowY: "auto",
+					whiteSpace: "pre-wrap", wordBreak: "break-all",
+					lineHeight: "1.5",
+				},
+			},
+				output.map((line, i) =>
+					React.createElement("div", {
+						key: i,
+						style: {
+							color: line.startsWith("[stderr]") ? "#f44336" :
+								line.startsWith("[ERROR]") ? "#f44336" :
+								line.startsWith("[CANCELLED]") ? "#ff9800" :
+								line.startsWith("[Process exited") ? "#888" :
+								line.startsWith("[SIGTERM") ? "#ff9800" :
+								line.startsWith("$") ? "#4ec9b0" :
+								line.startsWith(">") ? "#569cd6" :
+								"#d4d4d4",
+						},
+					}, line)
+				),
+				React.createElement("div", { ref: bottomRef }),
+			),
+			// Input
+			onInput && React.createElement("div", {
+				style: {
+					display: "flex", backgroundColor: "#252526",
+					borderTop: "1px solid #333",
+				},
+			},
+				React.createElement("span", {
+					style: { padding: "6px 8px", color: "#569cd6" },
+				}, ">"),
+				React.createElement("input", {
+					value: input,
+					onChange: (e: any) => setInput(e.target.value),
+					onKeyDown: handleKeyDown,
+					placeholder: running ? "Type input..." : "Process not running",
+					disabled: !running,
+					style: {
+						flex: 1, padding: "6px 0", border: "none",
+						backgroundColor: "transparent", color: "#d4d4d4",
+						fontFamily: "var(--font-monospace)", fontSize: "12px",
+						outline: "none",
+					},
+				}),
+			),
+		);
+	};
+}
+
+// ============================================================
+// useClaudeTask — write task files for Claude to pick up
+// ============================================================
+
+function createUseClaudeTask(app: App, getSettings: () => any) {
+	return function useClaudeTask(): {
+		createTask: (title: string, prompt: string, metadata?: Record<string, any>) => Promise<string | null>;
+		listTasks: () => Promise<Array<{ name: string; path: string }>>;
+	} {
+		const createTask = React.useCallback(async (
+			title: string,
+			prompt: string,
+			metadata?: Record<string, any>
+		): Promise<string | null> => {
+			const settings = getSettings();
+			if (!settings.claudeTasksFolder) {
+				console.error("[ReactRenderer] Claude tasks folder not configured");
+				return null;
+			}
+
+			const folder = app.vault.getAbstractFileByPath(settings.claudeTasksFolder);
+			if (!folder) {
+				await app.vault.createFolder(settings.claudeTasksFolder);
+			}
+
+			const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+			const safeName = title.replace(/[^a-zA-Z0-9-_ ]/g, "").replace(/\s+/g, "-");
+			const fileName = `${settings.claudeTasksFolder}/${timestamp}-${safeName}.md`;
+
+			const content = [
+				"---",
+				`title: "${title}"`,
+				`status: pending`,
+				`created: ${new Date().toISOString()}`,
+				...(metadata ? Object.entries(metadata).map(([k, v]) => `${k}: ${JSON.stringify(v)}`) : []),
+				"---",
+				"",
+				`# ${title}`,
+				"",
+				prompt,
+			].join("\n");
+
+			await app.vault.create(fileName, content);
+			return fileName;
+		}, []);
+
+		const listTasks = React.useCallback(async (): Promise<Array<{ name: string; path: string }>> => {
+			const settings = getSettings();
+			if (!settings.claudeTasksFolder) return [];
+
+			const folder = app.vault.getAbstractFileByPath(settings.claudeTasksFolder);
+			if (!folder) return [];
+
+			return app.vault.getMarkdownFiles()
+				.filter(f => f.path.startsWith(settings.claudeTasksFolder + "/"))
+				.map(f => ({ name: f.basename, path: f.path }));
+		}, []);
+
+		return { createTask, listTasks };
+	};
+}
+
+// ============================================================
+// useClaude — run Claude CLI
+// ============================================================
+
+function createUseClaude(getSettings: () => any) {
+	return function useClaude(): {
+		ask: (prompt: string, options?: { cwd?: string }) => boolean;
+		output: string[];
+		running: boolean;
+		kill: () => void;
+		clear: () => void;
+	} {
+		const [output, setOutput] = React.useState<string[]>([]);
+		const [running, setRunning] = React.useState(false);
+		const procRef = React.useRef<any>(null);
+
+		const ask = React.useCallback((prompt: string, options?: { cwd?: string }) => {
+			const settings = getSettings();
+			if (!settings.enableScriptExecution) {
+				setOutput(["[ERROR] Script execution is disabled in settings."]);
+				return false;
+			}
+			if (settings.scriptConfirmBeforeRun) {
+				if (!confirm(`Run Claude CLI?\n\nPrompt: ${prompt.slice(0, 200)}${prompt.length > 200 ? "..." : ""}`)) {
+					setOutput(prev => [...prev, "[CANCELLED] User cancelled."]);
+					return false;
+				}
+			}
+
+			if (procRef.current) {
+				try { procRef.current.kill(); } catch {}
+			}
+
+			setOutput([`[Claude] Sending prompt...`, `> ${prompt}`, ""]);
+			setRunning(true);
+
+			try {
+				const { spawn } = require("child_process");
+				const cliPath = settings.claudeCliPath || "claude";
+				const proc = spawn(cliPath, ["--print", prompt], {
+					cwd: options?.cwd,
+					stdio: ["pipe", "pipe", "pipe"],
+				});
+
+				procRef.current = proc;
+
+				proc.stdout.on("data", (data: Buffer) => {
+					setOutput(prev => [...prev, ...data.toString().split("\n")]);
+				});
+
+				proc.stderr.on("data", (data: Buffer) => {
+					setOutput(prev => [...prev, ...data.toString().split("\n").map((l: string) => `[stderr] ${l}`)]);
+				});
+
+				proc.on("close", (code: number) => {
+					setRunning(false);
+					procRef.current = null;
+					setOutput(prev => [...prev, "", `[Claude exited with code ${code}]`]);
+				});
+
+				proc.on("error", (err: Error) => {
+					setRunning(false);
+					procRef.current = null;
+					setOutput(prev => [...prev, `[ERROR] ${err.message}`]);
+				});
+
+				return true;
+			} catch (err: any) {
+				setRunning(false);
+				setOutput(prev => [...prev, `[ERROR] ${err.message}`]);
+				return false;
+			}
+		}, []);
+
+		const kill = React.useCallback(() => {
+			if (procRef.current) {
+				try { procRef.current.kill("SIGTERM"); } catch {}
+				setOutput(prev => [...prev, "[SIGTERM sent]"]);
+			}
+		}, []);
+
+		const clear = React.useCallback(() => { setOutput([]); }, []);
+
+		React.useEffect(() => {
+			return () => { if (procRef.current) try { procRef.current.kill(); } catch {} };
+		}, []);
+
+		return { ask, output, running, kill, clear };
+	};
+}
+
+// ============================================================
 // buildScope — assemble the full scope object
 // ============================================================
 
@@ -1339,7 +1740,7 @@ function createUsePlugin(app: App) {
  * Build the scope object injected into user component code.
  * Components are exposed as dynamic getters so references stay fresh.
  */
-export function buildScope(registry: ComponentRegistry, app: App): Record<string, any> {
+export function buildScope(registry: ComponentRegistry, app: App, getSettings?: () => any): Record<string, any> {
 	// Initialize persistent state
 	initPersistent(app);
 
@@ -1382,6 +1783,10 @@ export function buildScope(registry: ComponentRegistry, app: App): Record<string
 		useBacklinks: createUseBacklinks(app),
 		useFileContent: createUseFileContent(app),
 		usePlugin: createUsePlugin(app),
+		useProcess: createUseProcess(getSettings || (() => ({}))),
+		useClaude: createUseClaude(getSettings || (() => ({}))),
+		useClaudeTask: createUseClaudeTask(app, getSettings || (() => ({}))),
+		Terminal: createTerminalComponent(),
 	};
 
 	// Lazy-inject obsidian module (loaded on first access)

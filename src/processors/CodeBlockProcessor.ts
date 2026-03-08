@@ -75,7 +75,7 @@ async function renderJSXBlock(
 			return;
 		}
 
-		const scope = buildScope(plugin.registry, plugin.app);
+		const scope = buildScope(plugin.registry, plugin.app, () => plugin.settings);
 		scope.Markdown = plugin.getMarkdownComponent();
 
 		let evalError: string | null = null;
@@ -123,7 +123,7 @@ async function registerInlineComponent(
 			return;
 		}
 
-		const scope = buildScope(plugin.registry, plugin.app);
+		const scope = buildScope(plugin.registry, plugin.app, () => plugin.settings);
 		scope.Markdown = plugin.getMarkdownComponent();
 		const component = evaluateComponent(transpiled.code!, scope);
 
