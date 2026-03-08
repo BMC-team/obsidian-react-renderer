@@ -957,6 +957,381 @@ function createUseTags(app: App) {
 }
 
 // ============================================================
+// useInterval / useTimeout — auto-cleanup timer hooks
+// ============================================================
+
+function createUseInterval() {
+	return function useInterval(callback: () => void, delayMs: number | null): void {
+		const savedCallback = React.useRef(callback);
+
+		React.useEffect(() => {
+			savedCallback.current = callback;
+		}, [callback]);
+
+		React.useEffect(() => {
+			if (delayMs === null) return;
+			const id = setInterval(() => savedCallback.current(), delayMs);
+			return () => clearInterval(id);
+		}, [delayMs]);
+	};
+}
+
+function createUseTimeout() {
+	return function useTimeout(callback: () => void, delayMs: number | null): void {
+		const savedCallback = React.useRef(callback);
+
+		React.useEffect(() => {
+			savedCallback.current = callback;
+		}, [callback]);
+
+		React.useEffect(() => {
+			if (delayMs === null) return;
+			const id = setTimeout(() => savedCallback.current(), delayMs);
+			return () => clearTimeout(id);
+		}, [delayMs]);
+	};
+}
+
+// ============================================================
+// Table — built-in sortable/searchable data table
+// ============================================================
+
+function createTableComponent() {
+	return function Table(props: {
+		columns: Array<{ key: string; label: string; align?: string; width?: string; render?: (value: any, row: any) => any }>;
+		data: any[];
+		sortable?: boolean;
+		searchable?: boolean;
+		selectable?: boolean;
+		onSelect?: (selected: any[]) => void;
+		pageSize?: number;
+	}) {
+		const {
+			columns, data, sortable = true, searchable = false,
+			selectable = false, onSelect, pageSize = 0,
+		} = props;
+
+		const [sortCol, setSortCol] = React.useState("");
+		const [sortAsc, setSortAsc] = React.useState(true);
+		const [search, setSearch] = React.useState("");
+		const [selected, setSelected] = React.useState<Set<number>>(new Set());
+		const [page, setPage] = React.useState(0);
+
+		const toggleSort = (key: string) => {
+			if (sortCol === key) setSortAsc(!sortAsc);
+			else { setSortCol(key); setSortAsc(true); }
+		};
+
+		const toggleSelect = (idx: number) => {
+			setSelected(prev => {
+				const next = new Set(prev);
+				if (next.has(idx)) next.delete(idx); else next.add(idx);
+				if (onSelect) onSelect(Array.from(next).map(i => data[i]));
+				return next;
+			});
+		};
+
+		let filtered = data;
+		if (search) {
+			const q = search.toLowerCase();
+			filtered = data.filter(row =>
+				columns.some(col => String(row[col.key] ?? "").toLowerCase().includes(q))
+			);
+		}
+
+		if (sortCol) {
+			filtered = [...filtered].sort((a, b) => {
+				const av = a[sortCol], bv = b[sortCol];
+				const cmp = typeof av === "number" ? av - bv : String(av ?? "").localeCompare(String(bv ?? ""));
+				return sortAsc ? cmp : -cmp;
+			});
+		}
+
+		const totalPages = pageSize > 0 ? Math.ceil(filtered.length / pageSize) : 1;
+		const paged = pageSize > 0 ? filtered.slice(page * pageSize, (page + 1) * pageSize) : filtered;
+
+		const thStyle = (col: any): any => ({
+			padding: "6px 10px", cursor: sortable ? "pointer" : "default",
+			fontSize: "11px", fontWeight: "bold", textAlign: col.align || "left",
+			width: col.width || "auto",
+			color: sortCol === col.key ? "var(--interactive-accent)" : "var(--text-muted)",
+			borderBottom: "2px solid var(--background-modifier-border)",
+			userSelect: "none" as const,
+		});
+
+		const tdStyle = (align?: string): any => ({
+			padding: "5px 10px", fontSize: "12px", textAlign: align || "left",
+			borderBottom: "1px solid var(--background-modifier-border)",
+		});
+
+		return React.createElement("div", null,
+			searchable && React.createElement("input", {
+				value: search, onChange: (e: any) => { setSearch(e.target.value); setPage(0); },
+				placeholder: "Search...",
+				style: { width: "100%", padding: "5px 10px", borderRadius: "4px", border: "1px solid var(--background-modifier-border)", fontSize: "12px", marginBottom: "8px" },
+			}),
+			React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+				React.createElement("thead", null,
+					React.createElement("tr", null,
+						selectable && React.createElement("th", { style: { ...tdStyle(), width: "30px" } }),
+						columns.map(col =>
+							React.createElement("th", {
+								key: col.key,
+								style: thStyle(col),
+								onClick: sortable ? () => toggleSort(col.key) : undefined,
+							}, col.label, sortCol === col.key ? (sortAsc ? " ▲" : " ▼") : "")
+						)
+					)
+				),
+				React.createElement("tbody", null,
+					paged.map((row, i) => {
+						const dataIdx = pageSize > 0 ? page * pageSize + i : i;
+						return React.createElement("tr", {
+							key: dataIdx,
+							style: { backgroundColor: selected.has(dataIdx) ? "var(--background-modifier-hover)" : "transparent" },
+						},
+							selectable && React.createElement("td", { style: tdStyle() },
+								React.createElement("input", {
+									type: "checkbox", checked: selected.has(dataIdx),
+									onChange: () => toggleSelect(dataIdx),
+									style: { cursor: "pointer" },
+								})
+							),
+							columns.map(col =>
+								React.createElement("td", { key: col.key, style: tdStyle(col.align) },
+									col.render ? col.render(row[col.key], row) : String(row[col.key] ?? "")
+								)
+							)
+						);
+					})
+				)
+			),
+			React.createElement("div", {
+				style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px", color: "var(--text-muted)", padding: "6px 0" },
+			},
+				React.createElement("span", null, `${filtered.length} rows${selected.size > 0 ? ` · ${selected.size} selected` : ""}`),
+				totalPages > 1 && React.createElement("div", { style: { display: "flex", gap: "4px" } },
+					React.createElement("button", { onClick: () => setPage(p => Math.max(0, p - 1)), disabled: page === 0, style: { padding: "2px 8px", cursor: "pointer", fontSize: "11px" } }, "Prev"),
+					React.createElement("span", null, `${page + 1}/${totalPages}`),
+					React.createElement("button", { onClick: () => setPage(p => Math.min(totalPages - 1, p + 1)), disabled: page >= totalPages - 1, style: { padding: "2px 8px", cursor: "pointer", fontSize: "11px" } }, "Next"),
+				)
+			)
+		);
+	};
+}
+
+// ============================================================
+// Tabs — tab switcher component
+// ============================================================
+
+function createTabsComponent() {
+	return function Tabs(props: {
+		tabs: string[];
+		active: string;
+		onChange: (tab: string) => void;
+		variant?: "pills" | "underline";
+	}) {
+		const { tabs, active, onChange, variant = "underline" } = props;
+
+		const isPills = variant === "pills";
+
+		return React.createElement("div", {
+			style: {
+				display: "flex", gap: isPills ? "6px" : "0",
+				borderBottom: isPills ? "none" : "2px solid var(--background-modifier-border)",
+				marginBottom: "12px",
+			},
+		},
+			tabs.map(tab =>
+				React.createElement("div", {
+					key: tab,
+					onClick: () => onChange(tab),
+					style: {
+						padding: isPills ? "4px 14px" : "8px 16px",
+						cursor: "pointer", fontSize: "13px",
+						fontWeight: active === tab ? "bold" : "normal",
+						color: active === tab ? (isPills ? "#fff" : "var(--interactive-accent)") : "var(--text-muted)",
+						backgroundColor: isPills && active === tab ? "var(--interactive-accent)" : "transparent",
+						borderRadius: isPills ? "16px" : "0",
+						borderBottom: !isPills && active === tab ? "2px solid var(--interactive-accent)" : "2px solid transparent",
+						marginBottom: isPills ? "0" : "-2px",
+						transition: "all 0.15s ease",
+					},
+				}, tab)
+			)
+		);
+	};
+}
+
+// ============================================================
+// Input / Select — styled form controls
+// ============================================================
+
+function createFormComponents() {
+	const inputStyle: any = {
+		width: "100%", padding: "6px 10px", borderRadius: "4px",
+		border: "1px solid var(--background-modifier-border)",
+		backgroundColor: "var(--background-primary)",
+		color: "var(--text-normal)", fontSize: "13px",
+	};
+
+	function Input(props: {
+		value: string;
+		onChange: (value: string) => void;
+		placeholder?: string;
+		type?: string;
+		label?: string;
+		style?: any;
+	}) {
+		const { value, onChange, placeholder, type = "text", label, style } = props;
+		return React.createElement("div", { style: { marginBottom: "8px" } },
+			label && React.createElement("label", {
+				style: { display: "block", fontSize: "11px", color: "var(--text-muted)", marginBottom: "3px" },
+			}, label),
+			React.createElement("input", {
+				value, type, placeholder,
+				onChange: (e: any) => onChange(e.target.value),
+				style: { ...inputStyle, ...style },
+			})
+		);
+	}
+
+	function Select(props: {
+		value: string;
+		onChange: (value: string) => void;
+		options: Array<string | { label: string; value: string }>;
+		label?: string;
+		style?: any;
+	}) {
+		const { value, onChange, options, label, style } = props;
+		return React.createElement("div", { style: { marginBottom: "8px" } },
+			label && React.createElement("label", {
+				style: { display: "block", fontSize: "11px", color: "var(--text-muted)", marginBottom: "3px" },
+			}, label),
+			React.createElement("select", {
+				value,
+				onChange: (e: any) => onChange(e.target.value),
+				style: { ...inputStyle, ...style },
+			},
+				options.map(opt => {
+					const val = typeof opt === "string" ? opt : opt.value;
+					const lbl = typeof opt === "string" ? opt : opt.label;
+					return React.createElement("option", { key: val, value: val }, lbl);
+				})
+			)
+		);
+	}
+
+	return { Input, Select };
+}
+
+// ============================================================
+// useBacklinks — notes that link to the current note
+// ============================================================
+
+function createUseBacklinks(app: App) {
+	return function useBacklinks(): Array<{ path: string; name: string }> {
+		const [backlinks, setBacklinks] = React.useState<Array<{ path: string; name: string }>>([]);
+
+		React.useEffect(() => {
+			const activeFile = app.workspace.getActiveFile();
+			if (!activeFile) return;
+
+			const result: Array<{ path: string; name: string }> = [];
+			const resolvedLinks = (app.metadataCache as any).resolvedLinks || {};
+
+			for (const [sourcePath, links] of Object.entries(resolvedLinks)) {
+				if (links && typeof links === "object" && activeFile.path in (links as any)) {
+					const file = app.vault.getAbstractFileByPath(sourcePath);
+					if (file) {
+						result.push({ path: sourcePath, name: (file as any).basename || sourcePath });
+					}
+				}
+			}
+
+			setBacklinks(result.sort((a, b) => a.name.localeCompare(b.name)));
+		}, []);
+
+		return backlinks;
+	};
+}
+
+// ============================================================
+// useFileContent — read a file with live updates on change
+// ============================================================
+
+function createUseFileContent(app: App) {
+	return function useFileContent(path: string): {
+		content: string;
+		frontmatter: Record<string, any>;
+		loading: boolean;
+		error: string | null;
+	} {
+		const [state, setState] = React.useState<{
+			content: string;
+			frontmatter: Record<string, any>;
+			loading: boolean;
+			error: string | null;
+		}>({ content: "", frontmatter: {}, loading: true, error: null });
+
+		React.useEffect(() => {
+			let cancelled = false;
+
+			const readFile = async () => {
+				try {
+					let file = app.vault.getAbstractFileByPath(path);
+					if (!file) file = app.vault.getAbstractFileByPath(path + ".md");
+					if (!file) {
+						if (!cancelled) setState({ content: "", frontmatter: {}, loading: false, error: `Not found: ${path}` });
+						return;
+					}
+					const content = await app.vault.read(file as any);
+					const cache = app.metadataCache.getFileCache(file as any);
+					if (!cancelled) setState({ content, frontmatter: cache?.frontmatter ?? {}, loading: false, error: null });
+				} catch (err: any) {
+					if (!cancelled) setState({ content: "", frontmatter: {}, loading: false, error: err.message });
+				}
+			};
+
+			readFile();
+
+			// Watch for changes to this file
+			const ref = app.vault.on("modify", (modified) => {
+				if (modified.path === path || modified.path === path + ".md") {
+					readFile();
+				}
+			});
+
+			return () => {
+				cancelled = true;
+				app.vault.offref(ref);
+			};
+		}, [path]);
+
+		return state;
+	};
+}
+
+// ============================================================
+// usePlugin — access any installed plugin's API
+// ============================================================
+
+function createUsePlugin(app: App) {
+	return function usePlugin(pluginId: string): any {
+		const [api, setApi] = React.useState<any>(null);
+
+		React.useEffect(() => {
+			const plugin = (app as any).plugins?.plugins?.[pluginId];
+			if (plugin) {
+				setApi(plugin.api || plugin);
+			}
+		}, [pluginId]);
+
+		return api;
+	};
+}
+
+// ============================================================
 // buildScope — assemble the full scope object
 // ============================================================
 
@@ -999,6 +1374,14 @@ export function buildScope(registry: ComponentRegistry, app: App): Record<string
 		useTags: createUseTags(app),
 		Style: createStyleComponent(),
 		...createChartComponents(),
+		Table: createTableComponent(),
+		Tabs: createTabsComponent(),
+		...createFormComponents(),
+		useInterval: createUseInterval(),
+		useTimeout: createUseTimeout(),
+		useBacklinks: createUseBacklinks(app),
+		useFileContent: createUseFileContent(app),
+		usePlugin: createUsePlugin(app),
 	};
 
 	// Lazy-inject obsidian module (loaded on first access)
