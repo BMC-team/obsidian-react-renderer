@@ -4,10 +4,12 @@ import React from "react";
  * Evaluate transpiled component code within a scope.
  * Returns a React component function, or null on failure.
  *
- * The transpiled code is already unwrapped (just the function body).
- * We wrap it in `function UserComponent(props) { ... }` and inject
- * scope variables by destructuring the scope object at render time.
- * This ensures dynamic getters (registered components) resolve live.
+ * Uses `with(__scope__)` to make all scope properties available as
+ * local variables. This includes dynamic getters for registered
+ * components, which resolve at access time (not at definition time).
+ *
+ * `with` works because `new Function` creates sloppy-mode functions
+ * (not strict mode), where `with` is allowed.
  */
 export function evaluateComponent(
 	transpiledCode: string,
@@ -22,24 +24,16 @@ export function evaluateComponent(
 			? code
 			: `return (${stripTrailingSemicolon(code)})`;
 
-		// Build destructuring statement for all scope keys
-		const scopeKeys = Object.keys(scope).filter(
-			(k) => /^[a-zA-Z_$][\w$]*$/.test(k)
+		const factory = new Function(
+			"__scope__",
+			`with(__scope__) { return function UserComponent(props) {\n${body}\n} }`
 		);
-		const destructure = `const {${scopeKeys.join(",")}} = __scope__;`;
-
-		// The scope is passed as a single argument. Destructuring happens
-		// inside the component function body, so dynamic getters resolve
-		// at render time, not at definition time.
-		const fnBody = `return function UserComponent(props) {\n${destructure}\n${body}\n}`;
-		const factory = new Function("__scope__", fnBody);
 
 		const component = factory(scope);
 		return component;
 	} catch (err: any) {
 		const msg = err.message || String(err);
 		console.error("[ReactRenderer] Component evaluation error:", msg);
-		console.error("[ReactRenderer] Scope keys:", Object.keys(scope));
 		if (onError) onError(msg);
 		return null;
 	}
@@ -61,12 +55,7 @@ export function evaluateInlineJSX(
 			? code
 			: `return (${stripTrailingSemicolon(code)})`;
 
-		const scopeKeys = Object.keys(scope).filter(
-			(k) => /^[a-zA-Z_$][\w$]*$/.test(k)
-		);
-		const destructure = `const {${scopeKeys.join(",")}} = __scope__;`;
-
-		const fn = new Function("__scope__", `${destructure}\n${body}`);
+		const fn = new Function("__scope__", `with(__scope__) {\n${body}\n}`);
 		return fn(scope);
 	} catch (err) {
 		console.error("[ReactRenderer] Inline JSX evaluation error:", err);
@@ -76,7 +65,6 @@ export function evaluateInlineJSX(
 
 /**
  * Check if code contains a top-level return statement.
- * Simple heuristic: looks for `return` at the start of a line.
  */
 function hasReturnStatement(code: string): boolean {
 	return /(?:^|\n)\s*return[\s(;]/.test(code);
